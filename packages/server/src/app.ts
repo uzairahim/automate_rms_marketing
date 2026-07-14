@@ -7,6 +7,7 @@ import type { Publisher } from "./core/publisher.js";
 import { type HealthJobData } from "./queue/health-queue.js";
 import { registerSuperadminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerPlatformRoutes } from "./routes/platforms.js";
 
 /**
  * Everything the HTTP app depends on, injected at construction. This is what
@@ -43,6 +44,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // and Client-scoped User login on each Client subdomain.
   app.register(registerSuperadminRoutes);
   app.register(registerAuthRoutes);
+  // Plan-gated platform surface (Slice 3): what a Client's Plan lets it see/act on.
+  app.register(registerPlatformRoutes);
 
   app.get("/api/health", async () => {
     const { pool, clock } = app.deps;

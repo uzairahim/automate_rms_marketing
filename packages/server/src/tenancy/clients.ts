@@ -1,6 +1,8 @@
 import type pg from "pg";
 import { hashPassword } from "../auth/passwords.js";
 import { isValidSubdomain } from "./subdomain.js";
+import { ProvisionError } from "./errors.js";
+import { planFromRow, type Plan, type PlanColumns, type PlanPatch } from "./plan.js";
 
 /**
  * The Client/User provisioning store — the write side of the tenancy spine.
@@ -12,11 +14,15 @@ import { isValidSubdomain } from "./subdomain.js";
  * surfaced as {@link ProvisionError} so callers never race a check-then-insert.
  */
 
+export { ProvisionError, type ProvisionErrorCode } from "./errors.js";
+
 export interface Client {
   id: string;
   subdomain: string;
   timezone: string;
   createdAt: string;
+  /** The Superadmin-configured gating bundle (platform toggles + access status). */
+  plan: Plan;
 }
 
 export interface User {
@@ -25,21 +31,26 @@ export interface User {
   email: string;
 }
 
-/** A provisioning rule was violated; `code` maps to an HTTP status at the edge. */
-export type ProvisionErrorCode =
-  | "invalid_subdomain"
-  | "invalid_timezone"
-  | "subdomain_taken"
-  | "email_taken"
-  | "invalid_email"
-  | "weak_password"
-  | "client_not_found";
+/** The `clients` columns every read path selects, including the Plan columns. */
+interface ClientRow extends PlanColumns {
+  id: string;
+  subdomain: string;
+  timezone: string;
+  created_at: Date;
+}
 
-export class ProvisionError extends Error {
-  constructor(readonly code: ProvisionErrorCode, message: string) {
-    super(message);
-    this.name = "ProvisionError";
-  }
+/** The column list every Client read selects — kept in one place. */
+const CLIENT_COLUMNS = `id, subdomain, timezone, created_at,
+  facebook_enabled, instagram_enabled, tiktok_enabled, access_status`;
+
+function clientFromRow(row: ClientRow): Client {
+  return {
+    id: row.id,
+    subdomain: row.subdomain,
+    timezone: row.timezone,
+    createdAt: row.created_at.toISOString(),
+    plan: planFromRow(row),
+  };
 }
 
 /** Whether the runtime's ICU data recognizes this IANA timezone name. */
@@ -67,10 +78,15 @@ function isUniqueViolation(err: unknown, constraint: string): boolean {
   );
 }
 
-/** Provision a new Client. Rejects an invalid/taken subdomain or bad timezone. */
+/**
+ * Provision a new Client. Rejects an invalid/taken subdomain or bad timezone.
+ * The Plan's platform toggles may be set at creation via `plan`; any omitted
+ * toggle defaults off (a Client sees and pays for only what it needs). A new
+ * Client is always `active` — the Superadmin suspends/expires it later.
+ */
 export async function createClient(
   pool: pg.Pool,
-  input: { subdomain: string; timezone: string },
+  input: { subdomain: string; timezone: string; plan?: PlanPatch },
 ): Promise<Client> {
   const subdomain = input.subdomain.trim().toLowerCase();
   const timezone = input.timezone.trim();
@@ -85,25 +101,18 @@ export async function createClient(
     throw new ProvisionError("invalid_timezone", `Unknown timezone: ${timezone}`);
   }
 
+  const facebook = input.plan?.facebook ?? false;
+  const instagram = input.plan?.instagram ?? false;
+  const tiktok = input.plan?.tiktok ?? false;
+
   try {
-    const { rows } = await pool.query<{
-      id: string;
-      subdomain: string;
-      timezone: string;
-      created_at: Date;
-    }>(
-      `INSERT INTO clients (subdomain, timezone)
-       VALUES ($1, $2)
-       RETURNING id, subdomain, timezone, created_at`,
-      [subdomain, timezone],
+    const { rows } = await pool.query<ClientRow>(
+      `INSERT INTO clients (subdomain, timezone, facebook_enabled, instagram_enabled, tiktok_enabled)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING ${CLIENT_COLUMNS}`,
+      [subdomain, timezone, facebook, instagram, tiktok],
     );
-    const row = rows[0]!;
-    return {
-      id: row.id,
-      subdomain: row.subdomain,
-      timezone: row.timezone,
-      createdAt: row.created_at.toISOString(),
-    };
+    return clientFromRow(rows[0]!);
   } catch (err) {
     if (isUniqueViolation(err, "clients_subdomain_key")) {
       throw new ProvisionError("subdomain_taken", `Subdomain already in use: ${subdomain}`);
@@ -114,22 +123,12 @@ export async function createClient(
 
 /** All Clients, newest first — the Superadmin's single global view. */
 export async function listClients(pool: pg.Pool): Promise<Client[]> {
-  const { rows } = await pool.query<{
-    id: string;
-    subdomain: string;
-    timezone: string;
-    created_at: Date;
-  }>(
-    `SELECT id, subdomain, timezone, created_at
+  const { rows } = await pool.query<ClientRow>(
+    `SELECT ${CLIENT_COLUMNS}
      FROM clients
      ORDER BY created_at DESC, subdomain ASC`,
   );
-  return rows.map((row) => ({
-    id: row.id,
-    subdomain: row.subdomain,
-    timezone: row.timezone,
-    createdAt: row.created_at.toISOString(),
-  }));
+  return rows.map(clientFromRow);
 }
 
 /**
@@ -180,21 +179,10 @@ export async function findClientBySubdomain(
   pool: pg.Pool,
   subdomain: string,
 ): Promise<Client | null> {
-  const { rows } = await pool.query<{
-    id: string;
-    subdomain: string;
-    timezone: string;
-    created_at: Date;
-  }>(
-    `SELECT id, subdomain, timezone, created_at FROM clients WHERE subdomain = $1`,
+  const { rows } = await pool.query<ClientRow>(
+    `SELECT ${CLIENT_COLUMNS} FROM clients WHERE subdomain = $1`,
     [subdomain.toLowerCase()],
   );
   const row = rows[0];
-  if (!row) return null;
-  return {
-    id: row.id,
-    subdomain: row.subdomain,
-    timezone: row.timezone,
-    createdAt: row.created_at.toISOString(),
-  };
+  return row ? clientFromRow(row) : null;
 }

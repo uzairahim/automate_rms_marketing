@@ -81,4 +81,25 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX sessions_user_id ON sessions (user_id);
     `,
   },
+  {
+    // Slice 3 — Plan gating. A Client's Plan is a strict 1:1 with the Client
+    // (one bundle per Client), so it lives as columns on `clients` rather than
+    // its own table. Three per-platform toggles gate what Users see and may act
+    // on; `access_status` gates login and every action entirely. Payment is
+    // manual/off-platform — the Superadmin flips these by hand (CONTEXT.md `Plan`).
+    name: "003_plan_gating",
+    sql: /* sql */ `
+      ALTER TABLE clients
+        -- Platforms are opt-in: a Client "sees and pays for what it needs", so a
+        -- newly provisioned Client has none until the Superadmin enables them.
+        ADD COLUMN facebook_enabled  boolean NOT NULL DEFAULT false,
+        ADD COLUMN instagram_enabled boolean NOT NULL DEFAULT false,
+        ADD COLUMN tiktok_enabled    boolean NOT NULL DEFAULT false,
+        -- Constraint named explicitly so the update code can rely on it; access
+        -- defaults to 'active' so existing Clients stay logged-in-able.
+        ADD COLUMN access_status text NOT NULL DEFAULT 'active'
+          CONSTRAINT clients_access_status_check
+          CHECK (access_status IN ('active', 'suspended', 'expired'));
+    `,
+  },
 ];

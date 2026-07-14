@@ -8,6 +8,7 @@ import {
   ProvisionError,
   type ProvisionErrorCode,
 } from "../tenancy/clients.js";
+import { isAccessStatus, updatePlan, type PlanPatch } from "../tenancy/plan.js";
 
 /**
  * The Superadmin `admin.` API surface (PRD stories 1, 5, 7, 12).
@@ -24,10 +25,40 @@ const HTTP_STATUS: Record<ProvisionErrorCode, number> = {
   invalid_timezone: 400,
   invalid_email: 400,
   weak_password: 400,
+  invalid_plan: 400,
+  invalid_access_status: 400,
   subdomain_taken: 409,
   email_taken: 409,
   client_not_found: 404,
 };
+
+/**
+ * Parse a plan-patch request body into a typed {@link PlanPatch}, rejecting any
+ * malformed field. Only the fields present in the body are set; a bad platform
+ * toggle or unknown access status is a 400 via {@link ProvisionError}.
+ */
+function parsePlanPatch(body: Record<string, unknown>): PlanPatch {
+  const patch: PlanPatch = {};
+  for (const platform of ["facebook", "instagram", "tiktok"] as const) {
+    const value = body[platform];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") {
+      throw new ProvisionError("invalid_plan", `${platform} must be a boolean.`);
+    }
+    patch[platform] = value;
+  }
+  if (body.accessStatus !== undefined) {
+    const status = body.accessStatus;
+    if (typeof status !== "string" || !isAccessStatus(status)) {
+      throw new ProvisionError(
+        "invalid_access_status",
+        "accessStatus must be one of: active, suspended, expired.",
+      );
+    }
+    patch.accessStatus = status;
+  }
+  return patch;
+}
 
 function sendProvisionError(reply: FastifyReply, err: ProvisionError): FastifyReply {
   return reply.code(HTTP_STATUS[err.code]).send({ error: err.code, message: err.message });
@@ -58,25 +89,26 @@ export async function registerSuperadminRoutes(app: FastifyInstance): Promise<vo
     }
   };
 
-  app.post<{ Body: { subdomain?: string; timezone?: string } }>(
-    "/api/admin/clients",
-    { preHandler: guard },
-    async (request, reply) => {
-      const { subdomain, timezone } = request.body ?? {};
-      if (typeof subdomain !== "string" || typeof timezone !== "string") {
-        return reply
-          .code(400)
-          .send({ error: "invalid_body", message: "subdomain and timezone are required." });
-      }
-      try {
-        const client = await createClient(app.deps.pool, { subdomain, timezone });
-        return reply.code(201).send(client);
-      } catch (err) {
-        if (err instanceof ProvisionError) return sendProvisionError(reply, err);
-        throw err;
-      }
-    },
-  );
+  app.post<{
+    Body: { subdomain?: string; timezone?: string; plan?: Record<string, unknown> };
+  }>("/api/admin/clients", { preHandler: guard }, async (request, reply) => {
+    const { subdomain, timezone, plan } = request.body ?? {};
+    if (typeof subdomain !== "string" || typeof timezone !== "string") {
+      return reply
+        .code(400)
+        .send({ error: "invalid_body", message: "subdomain and timezone are required." });
+    }
+    try {
+      // Only the platform toggles may be set at creation; access status is always
+      // `active` for a new Client, so ignore any accessStatus in the create body.
+      const { accessStatus: _ignored, ...toggles } = plan ? parsePlanPatch(plan) : {};
+      const client = await createClient(app.deps.pool, { subdomain, timezone, plan: toggles });
+      return reply.code(201).send(client);
+    } catch (err) {
+      if (err instanceof ProvisionError) return sendProvisionError(reply, err);
+      throw err;
+    }
+  });
 
   app.get("/api/admin/clients", { preHandler: guard }, async () => {
     return listClients(app.deps.pool);
@@ -99,6 +131,30 @@ export async function registerSuperadminRoutes(app: FastifyInstance): Promise<vo
           password,
         });
         return reply.code(201).send(user);
+      } catch (err) {
+        if (err instanceof ProvisionError) return sendProvisionError(reply, err);
+        throw err;
+      }
+    },
+  );
+
+  // Change a Client's Plan after creation (PRD stories 8, 13): toggle platforms
+  // and/or set access status. Any subset of fields may be sent; the rest are
+  // left as-is. This is the Superadmin's single lever over Client access.
+  app.patch<{ Params: { clientId: string }; Body: Record<string, unknown> }>(
+    "/api/admin/clients/:clientId/plan",
+    { preHandler: guard },
+    async (request, reply) => {
+      let patch;
+      try {
+        patch = parsePlanPatch(request.body ?? {});
+      } catch (err) {
+        if (err instanceof ProvisionError) return sendProvisionError(reply, err);
+        throw err;
+      }
+      try {
+        const plan = await updatePlan(app.deps.pool, request.params.clientId, patch);
+        return reply.code(200).send({ id: request.params.clientId, plan });
       } catch (err) {
         if (err instanceof ProvisionError) return sendProvisionError(reply, err);
         throw err;
