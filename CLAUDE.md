@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-Issues and PRDs live as local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+Issues and PRDs live as GitHub Issues (via the `gh` CLI); external PRs are not a triage surface. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
