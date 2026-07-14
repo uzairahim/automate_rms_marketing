@@ -16,7 +16,8 @@ export type ProvisionErrorCode =
   | "weak_password"
   | "invalid_plan"
   | "invalid_access_status"
-  | "client_not_found";
+  | "client_not_found"
+  | "user_not_found";
 
 export class ProvisionError extends Error {
   constructor(

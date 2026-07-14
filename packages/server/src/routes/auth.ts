@@ -1,6 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { AuthError, login } from "../auth/sessions.js";
 import {
+  completePasswordReset,
+  PasswordResetError,
+  requestPasswordReset,
+} from "../auth/password-reset.js";
+import {
   accessDenied,
   authenticateClientRequest,
   resolveClientForRequest,
@@ -61,6 +66,63 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       } catch (err) {
         if (err instanceof AuthError) {
           return reply.code(401).send({ error: err.code });
+        }
+        throw err;
+      }
+    },
+  );
+
+  // Request a reset link (PRD story: password recovery). Always answers with the
+  // same generic 202 whether or not the email belongs to a User, so the endpoint
+  // can't be used to discover which emails exist. Not gated on access status:
+  // recovering a credential is orthogonal to whether the Plan currently permits
+  // login — a reset never itself grants access.
+  app.post<{ Body: { email?: string } }>(
+    "/api/auth/password-reset/request",
+    async (request, reply) => {
+      const client = await resolveClientForRequest(request, reply);
+      if (!client) return reply;
+
+      const { email } = request.body ?? {};
+      if (typeof email !== "string") {
+        return reply.code(400).send({ error: "invalid_body", message: "email is required." });
+      }
+
+      await requestPasswordReset(app.deps.pool, app.deps.clock, app.deps.emailSender, {
+        clientId: client.id,
+        subdomain: client.subdomain,
+        email,
+        baseDomain: app.deps.baseDomain,
+      });
+      // Generic acknowledgement regardless of whether a User matched.
+      return reply.code(202).send({ status: "ok" });
+    },
+  );
+
+  // Complete a reset with the token from the emailed link plus a new password.
+  app.post<{ Body: { token?: string; password?: string } }>(
+    "/api/auth/password-reset/complete",
+    async (request, reply) => {
+      const client = await resolveClientForRequest(request, reply);
+      if (!client) return reply;
+
+      const { token, password } = request.body ?? {};
+      if (typeof token !== "string" || typeof password !== "string") {
+        return reply
+          .code(400)
+          .send({ error: "invalid_body", message: "token and password are required." });
+      }
+
+      try {
+        await completePasswordReset(app.deps.pool, app.deps.clock, {
+          clientId: client.id,
+          token,
+          newPassword: password,
+        });
+        return reply.code(200).send({ status: "ok" });
+      } catch (err) {
+        if (err instanceof PasswordResetError) {
+          return reply.code(400).send({ error: err.code, message: err.message });
         }
         throw err;
       }

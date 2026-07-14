@@ -21,6 +21,16 @@ export interface Config {
    * a full Superadmin login can layer on later without changing the routes.
    */
   superadminToken: string;
+  /**
+   * Transactional email (Slice 4). `from` is the sender address on every
+   * outbound message. `resendApiKey` is the provider key read from the
+   * environment — when set, real mail is sent via Resend; when absent (local
+   * dev), the app falls back to a console sender that logs the reset link.
+   */
+  email: {
+    from: string;
+    resendApiKey?: string;
+  };
 }
 
 function required(name: string): string {
@@ -38,5 +48,9 @@ export function loadConfig(): Config {
     apiPort: Number(process.env.API_PORT ?? 3001),
     baseDomain: process.env.BASE_DOMAIN ?? "localhost",
     superadminToken: required("SUPERADMIN_TOKEN"),
+    email: {
+      from: process.env.EMAIL_FROM ?? "no-reply@localhost",
+      resendApiKey: process.env.RESEND_API_KEY,
+    },
   };
 }

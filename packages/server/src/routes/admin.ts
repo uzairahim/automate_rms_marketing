@@ -5,6 +5,7 @@ import {
   createClient,
   createUser,
   listClients,
+  setUserPassword,
   ProvisionError,
   type ProvisionErrorCode,
 } from "../tenancy/clients.js";
@@ -30,6 +31,7 @@ const HTTP_STATUS: Record<ProvisionErrorCode, number> = {
   subdomain_taken: 409,
   email_taken: 409,
   client_not_found: 404,
+  user_not_found: 404,
 };
 
 /**
@@ -155,6 +157,29 @@ export async function registerSuperadminRoutes(app: FastifyInstance): Promise<vo
       try {
         const plan = await updatePlan(app.deps.pool, request.params.clientId, patch);
         return reply.code(200).send({ id: request.params.clientId, plan });
+      } catch (err) {
+        if (err instanceof ProvisionError) return sendProvisionError(reply, err);
+        throw err;
+      }
+    },
+  );
+
+  // Set any User's password directly — the Superadmin's out-of-band unblock for
+  // a User who can't complete the self-service reset. Revokes the User's live
+  // sessions and pending reset links so the new password takes effect at once.
+  app.post<{ Params: { userId: string }; Body: { password?: string } }>(
+    "/api/admin/users/:userId/password",
+    { preHandler: guard },
+    async (request, reply) => {
+      const { password } = request.body ?? {};
+      if (typeof password !== "string") {
+        return reply
+          .code(400)
+          .send({ error: "invalid_body", message: "password is required." });
+      }
+      try {
+        await setUserPassword(app.deps.pool, { userId: request.params.userId, password });
+        return reply.code(200).send({ status: "ok" });
       } catch (err) {
         if (err instanceof ProvisionError) return sendProvisionError(reply, err);
         throw err;

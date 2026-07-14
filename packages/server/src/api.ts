@@ -6,6 +6,7 @@ import { runMigrations } from "./db/migrate.js";
 import { buildApp } from "./app.js";
 import { SystemClock } from "./core/clock.js";
 import { FakePublisher } from "./core/fake-publisher.js";
+import { ConsoleEmailSender, ResendEmailSender, type EmailSender } from "./core/email.js";
 import {
   HEALTH_QUEUE_NAME,
   redisConnection,
@@ -29,10 +30,17 @@ async function main(): Promise<void> {
     connection: redisConnection(config.redisUrl),
   });
 
+  // Real mail via Resend when a provider key is configured; otherwise the
+  // console sender logs the reset link so local dev needs no provider wiring.
+  const emailSender: EmailSender = config.email.resendApiKey
+    ? new ResendEmailSender(config.email.resendApiKey, config.email.from)
+    : new ConsoleEmailSender();
+
   const app = buildApp({
     pool,
     clock: new SystemClock(),
     publisher: new FakePublisher(),
+    emailSender,
     baseDomain: config.baseDomain,
     superadminToken: config.superadminToken,
     healthQueue,

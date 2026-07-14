@@ -4,6 +4,7 @@ import type pg from "pg";
 import { Queue } from "bullmq";
 import type { Clock } from "./core/clock.js";
 import type { Publisher } from "./core/publisher.js";
+import type { EmailSender } from "./core/email.js";
 import { type HealthJobData } from "./queue/health-queue.js";
 import { registerSuperadminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -20,6 +21,8 @@ export interface AppDeps {
   pool: pg.Pool;
   clock: Clock;
   publisher: Publisher;
+  /** Sends transactional email (password-reset links). Faked in tests. */
+  emailSender: EmailSender;
   /** Base domain for subdomain routing (e.g. `ourapp.com`, or `localhost` in dev). */
   baseDomain: string;
   /** Shared secret gating the Superadmin `admin.` surface. */

@@ -102,4 +102,24 @@ export const migrations: readonly Migration[] = [
           CHECK (access_status IN ('active', 'suspended', 'expired'));
     `,
   },
+  {
+    // Slice 4 — self-service password reset. A User who forgets their password
+    // requests an expiring link by email; completing it sets a new password.
+    // The raw token travels in the emailed link and is never stored — we keep
+    // only its SHA-256 hash, so a database dump can't be used to seize accounts
+    // (unlike a session token, a reset token is exposed in transit over email).
+    // A token is single-use: `consumed_at` is stamped the moment it succeeds,
+    // and `expires_at` bounds its lifetime; both are checked against the Clock.
+    name: "004_password_reset_tokens",
+    sql: /* sql */ `
+      CREATE TABLE password_reset_tokens (
+        token_hash   text PRIMARY KEY,
+        user_id      uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        created_at   timestamptz NOT NULL DEFAULT now(),
+        expires_at   timestamptz NOT NULL,
+        consumed_at  timestamptz
+      );
+      CREATE INDEX password_reset_tokens_user_id ON password_reset_tokens (user_id);
+    `,
+  },
 ];

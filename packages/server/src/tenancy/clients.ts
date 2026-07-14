@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { hashPassword } from "../auth/passwords.js";
+import { hashPassword, isStrongPassword, WEAK_PASSWORD_MESSAGE } from "../auth/passwords.js";
 import { isValidSubdomain } from "./subdomain.js";
 import { ProvisionError } from "./errors.js";
 import { planFromRow, type Plan, type PlanColumns, type PlanPatch } from "./plan.js";
@@ -145,8 +145,8 @@ export async function createUser(
   if (!EMAIL_PATTERN.test(email)) {
     throw new ProvisionError("invalid_email", `Not a valid email address: ${input.email}`);
   }
-  if (input.password.length < 8) {
-    throw new ProvisionError("weak_password", "Password must be at least 8 characters.");
+  if (!isStrongPassword(input.password)) {
+    throw new ProvisionError("weak_password", WEAK_PASSWORD_MESSAGE);
   }
 
   const passwordHash = await hashPassword(input.password);
@@ -171,6 +171,61 @@ export async function createUser(
       throw new ProvisionError("client_not_found", `No such Client: ${input.clientId}`);
     }
     throw err;
+  }
+}
+
+/**
+ * Set a User's password directly — the Superadmin's out-of-band unblock for a
+ * User who cannot use the self-service reset flow (Slice 4). The password is
+ * hashed before storage and every one of the User's live sessions is revoked,
+ * so a set password immediately takes effect everywhere. Any outstanding
+ * self-service reset tokens for the User are also dropped.
+ *
+ * @throws {ProvisionError} `weak_password` if the new password is too short,
+ * `user_not_found` if no User has that id (including a malformed uuid).
+ */
+export async function setUserPassword(
+  pool: pg.Pool,
+  input: { userId: string; password: string },
+): Promise<void> {
+  if (!isStrongPassword(input.password)) {
+    throw new ProvisionError("weak_password", WEAK_PASSWORD_MESSAGE);
+  }
+  const passwordHash = await hashPassword(input.password);
+
+  // Set the password and revoke live sessions + pending reset links as one unit,
+  // so "immediately takes effect everywhere" can't be left half-applied by a
+  // mid-sequence failure (matching completePasswordReset's atomicity).
+  const conn = await pool.connect();
+  try {
+    await conn.query("BEGIN");
+
+    let rowCount: number | null;
+    try {
+      ({ rowCount } = await conn.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [
+        input.userId,
+        passwordHash,
+      ]));
+    } catch (err) {
+      // A malformed uuid (22P02) names a User that cannot exist → 404.
+      if ((err as { code?: string })?.code === "22P02") {
+        throw new ProvisionError("user_not_found", `No such User: ${input.userId}`);
+      }
+      throw err;
+    }
+    if (!rowCount) {
+      throw new ProvisionError("user_not_found", `No such User: ${input.userId}`);
+    }
+
+    await conn.query(`DELETE FROM sessions WHERE user_id = $1`, [input.userId]);
+    await conn.query(`DELETE FROM password_reset_tokens WHERE user_id = $1`, [input.userId]);
+
+    await conn.query("COMMIT");
+  } catch (err) {
+    await conn.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
   }
 }
 

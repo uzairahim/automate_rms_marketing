@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
+import { FakeEmailSender } from "../src/core/fake-email.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
 
 describe("GET /api/health (API + Postgres seam)", () => {
@@ -16,6 +17,7 @@ describe("GET /api/health (API + Postgres seam)", () => {
       pool: db.pool,
       clock,
       publisher: new FakePublisher(),
+      emailSender: new FakeEmailSender(),
       baseDomain: "localhost",
       superadminToken: "test-superadmin-token",
     });

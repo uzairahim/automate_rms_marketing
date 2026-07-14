@@ -4,6 +4,7 @@ import { Queue } from "bullmq";
 import { buildApp } from "../src/app.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
+import { FakeEmailSender } from "../src/core/fake-email.js";
 import { startHealthWorker } from "../src/worker/health-worker.js";
 import {
   HEALTH_QUEUE_NAME,
@@ -41,6 +42,7 @@ describe("Health job round-trip (BullMQ worker end-to-end)", () => {
       pool: db.pool,
       clock: new TestClock(),
       publisher: new FakePublisher(),
+      emailSender: new FakeEmailSender(),
       baseDomain: "localhost",
       superadminToken: "test-superadmin-token",
       healthQueue: queue,
