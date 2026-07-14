@@ -41,6 +41,8 @@ describe("Health job round-trip (BullMQ worker end-to-end)", () => {
       pool: db.pool,
       clock: new TestClock(),
       publisher: new FakePublisher(),
+      baseDomain: "localhost",
+      superadminToken: "test-superadmin-token",
       healthQueue: queue,
     });
     await app.ready();

@@ -33,6 +33,8 @@ async function main(): Promise<void> {
     pool,
     clock: new SystemClock(),
     publisher: new FakePublisher(),
+    baseDomain: config.baseDomain,
+    superadminToken: config.superadminToken,
     healthQueue,
   });
 

@@ -38,4 +38,47 @@ export const migrations: readonly Migration[] = [
       );
     `,
   },
+  {
+    // Slice 2 — the tenancy spine: Clients, their Users, and login Sessions.
+    // Plan/branding columns arrive in later slices (Plan gating is Slice 3,
+    // branding Slice 5); this migration carries only what the spine needs.
+    name: "002_tenancy",
+    sql: /* sql */ `
+      -- A Client is the unit of tenant isolation, reached at its own subdomain
+      -- and anchored to a single timezone for all scheduling/analytics.
+      CREATE TABLE clients (
+        id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        -- Constraint named explicitly: the provisioning code maps this exact
+        -- name to a 409 "subdomain_taken", so it must not depend on Postgres's
+        -- auto-generated name.
+        subdomain   text NOT NULL CONSTRAINT clients_subdomain_key UNIQUE,
+        timezone    text NOT NULL,
+        created_at  timestamptz NOT NULL DEFAULT now()
+      );
+
+      -- A User belongs to exactly one Client. Email is globally unique across
+      -- the whole platform (case-insensitive), enforced by the DB — the same
+      -- email can never belong to two Clients.
+      CREATE TABLE users (
+        id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        client_id      uuid NOT NULL REFERENCES clients (id) ON DELETE CASCADE,
+        email          text NOT NULL,
+        password_hash  text NOT NULL,
+        created_at     timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE UNIQUE INDEX users_email_unique ON users (lower(email));
+      CREATE INDEX users_client_id ON users (client_id);
+
+      -- Opaque, DB-backed login sessions. The token is the primary key; the API
+      -- hands it to the SPA and looks the User up by it on each request. Being a
+      -- row (not a stateless JWT) lets later slices revoke on suspension/logout.
+      CREATE TABLE sessions (
+        token       text PRIMARY KEY,
+        user_id     uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        created_at  timestamptz NOT NULL DEFAULT now(),
+        expires_at  timestamptz NOT NULL
+      );
+      CREATE INDEX sessions_user_id ON sessions (user_id);
+    `,
+  },
 ];

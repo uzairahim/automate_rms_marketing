@@ -12,7 +12,13 @@ describe("GET /api/health (API + Postgres seam)", () => {
 
   beforeAll(async () => {
     db = await startTestPostgres();
-    app = buildApp({ pool: db.pool, clock, publisher: new FakePublisher() });
+    app = buildApp({
+      pool: db.pool,
+      clock,
+      publisher: new FakePublisher(),
+      baseDomain: "localhost",
+      superadminToken: "test-superadmin-token",
+    });
     await app.ready();
   });
 

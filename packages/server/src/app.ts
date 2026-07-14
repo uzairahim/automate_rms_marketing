@@ -5,6 +5,8 @@ import { Queue } from "bullmq";
 import type { Clock } from "./core/clock.js";
 import type { Publisher } from "./core/publisher.js";
 import { type HealthJobData } from "./queue/health-queue.js";
+import { registerSuperadminRoutes } from "./routes/admin.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 
 /**
  * Everything the HTTP app depends on, injected at construction. This is what
@@ -17,6 +19,10 @@ export interface AppDeps {
   pool: pg.Pool;
   clock: Clock;
   publisher: Publisher;
+  /** Base domain for subdomain routing (e.g. `ourapp.com`, or `localhost` in dev). */
+  baseDomain: string;
+  /** Shared secret gating the Superadmin `admin.` surface. */
+  superadminToken: string;
   /** The health queue. Optional so pure-HTTP tests can omit Redis entirely. */
   healthQueue?: Queue<HealthJobData>;
 }
@@ -32,6 +38,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.decorate("deps", deps);
 
   app.register(cors, { origin: true });
+
+  // The tenancy spine (Slice 2): Superadmin provisioning on the `admin.` surface
+  // and Client-scoped User login on each Client subdomain.
+  app.register(registerSuperadminRoutes);
+  app.register(registerAuthRoutes);
 
   app.get("/api/health", async () => {
     const { pool, clock } = app.deps;
