@@ -1,0 +1,32 @@
+# Local dev infrastructure for the walking skeleton (Slice 1).
+# Postgres and Redis only — the API, worker, and web run on the host via `npm run dev`.
+# Ports are offset from the defaults so this stack can coexist with other local Postgres/Redis.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: smma
+      POSTGRES_PASSWORD: smma
+      POSTGRES_DB: smma
+    ports:
+      - "55432:5432"
+    volumes:
+      - smma_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smma -d smma"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  smma_pgdata:

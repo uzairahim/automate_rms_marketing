@@ -1,0 +1,23 @@
+{
+  "name": "social-media-marketing-automation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "White-label multi-tenant social media marketing automation platform",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n infra,api,worker,web -c blue,green,magenta,cyan \"npm:dev:infra\" \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
+    "dev:infra": "docker compose up",
+    "dev:api": "npm -w @smma/server run dev:api",
+    "dev:worker": "npm -w @smma/server run dev:worker",
+    "dev:web": "npm -w @smma/web run dev",
+    "migrate": "npm -w @smma/server run migrate",
+    "build": "npm -w @smma/server run build && npm -w @smma/web run build",
+    "typecheck": "npm -w @smma/server run typecheck && npm -w @smma/web run typecheck",
+    "test": "npm -w @smma/server run test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
