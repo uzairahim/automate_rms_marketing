@@ -49,11 +49,25 @@ npm run dev                 # boots Postgres + Redis + API + worker + web
 - Worker consuming the `health` queue
 - SPA on `localhost:5173` (proxies `/api` to the API)
 
-Open <http://localhost:5173> — it renders the API health status read from
-Postgres. `POST /api/health/enqueue` enqueues a job the worker records in
-`job_runs`, proving the queue round-trip.
+Open <http://localhost:5173> — the SPA renders the Client's branding, a login
+screen, and (once signed in) the Client's Connected Accounts. `GET /api/health`
+and `POST /api/health/enqueue` still prove the API → Postgres and queue
+round-trips.
 
 Run migrations standalone with `npm run migrate`.
+
+### Connecting a Facebook Page without a Meta app
+
+With `META_APP_ID`/`META_APP_SECRET` unset, the app wires the **fake
+`Publisher`** instead of the real Graph API transport, so the whole connect flow
+is clickable end-to-end locally without reaching Facebook (the same shape as the
+console email sender). Set both to build against a real test Page while App
+Review is pending — see [docs/platform-app-setup.md](docs/platform-app-setup.md).
+
+`TOKEN_ENCRYPTION_KEY` is **required** (ADR 0006): platform tokens are encrypted
+at rest with a key that lives outside the database. `.env.example` ships a
+dev-only key — generate a real one for anything else, and note that **losing the
+key forces every Client to reconnect every social account**.
 
 ## Test
 

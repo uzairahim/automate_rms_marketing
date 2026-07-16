@@ -97,7 +97,20 @@ approvals are the long pole and must start on day one.
 - A **data deletion / account removal** endpoint or documented process.
 - A **deauthorization callback** endpoint (Meta requires one — called when a user
   removes our app; we should mark that Connected Account as disconnected).
+  **Built** (Slice 6): `POST /api/webhooks/meta/deauthorize`. Register it as the
+  Meta app's *Deauthorize Callback URL*. It verifies Meta's `signed_request`
+  against `META_APP_SECRET` and refuses anything it cannot verify — so the secret
+  must be configured for the endpoint to work at all.
 - HTTPS everywhere, with our OAuth **redirect URIs** registered per app.
+  Meta does **not** accept wildcard redirect URIs, so a per-Client-subdomain
+  callback is impossible. We register exactly one — `<OAUTH_REDIRECT_BASE_URL>` +
+  `/oauth/facebook/callback` — and re-tenant the returning User from the
+  server-side `oauth_states` row rather than from the host they land on. Add that
+  one URL to the app's *Valid OAuth Redirect URIs*.
+- Facebook login requests these scopes (Slice 6): `pages_show_list`,
+  `pages_manage_posts`, `pages_read_engagement`, `business_management`.
+  `pages_show_list` is the one ADR 0005 depends on — it is what lets us ask which
+  Pages a person manages instead of taking their word for it.
 - Media storage with public URLs (for IG, and as the upload source generally).
 
 ---

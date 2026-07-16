@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { Queue } from "bullmq";
-import { buildApp } from "../src/app.js";
+import { buildTestApp } from "./helpers/app.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { FakeEmailSender } from "../src/core/fake-email.js";
@@ -38,7 +38,7 @@ describe("Health job round-trip (BullMQ worker end-to-end)", () => {
     queue = new Queue<HealthJobData>(HEALTH_QUEUE_NAME, { connection: redis.connection });
     worker = startHealthWorker(db.pool, redis.connection);
     await worker.waitUntilReady();
-    app = buildApp({
+    app = buildTestApp({
       pool: db.pool,
       clock: new TestClock(),
       publisher: new FakePublisher(),

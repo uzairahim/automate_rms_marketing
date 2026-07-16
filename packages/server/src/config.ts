@@ -31,6 +31,28 @@ export interface Config {
     from: string;
     resendApiKey?: string;
   };
+  /**
+   * Base64 32-byte key for encrypting platform tokens at rest (ADR 0006).
+   * Required: there is no "unencrypted" mode, because a database dump alone must
+   * be useless. **Losing this key forces every Client to reconnect every social
+   * account** — back it up somewhere other than the database.
+   */
+  tokenEncryptionKey: string;
+  /**
+   * Origin of the canonical OAuth callback surface. Every Client's handshake
+   * comes back through this one host: Meta will not whitelist a wildcard
+   * redirect URI, so it cannot be per-subdomain.
+   */
+  oauthRedirectBaseUrl: string;
+  /**
+   * Our Meta app (Slice 6). Absent in local dev, in which case the app falls
+   * back to the fake Publisher — the same shape as the email sender's fallback,
+   * so a fresh checkout runs with no Meta credentials at all.
+   */
+  meta: {
+    appId?: string;
+    appSecret?: string;
+  };
 }
 
 function required(name: string): string {
@@ -42,15 +64,25 @@ function required(name: string): string {
 }
 
 export function loadConfig(): Config {
+  const apiPort = Number(process.env.API_PORT ?? 3001);
+
   return {
     databaseUrl: required("DATABASE_URL"),
     redisUrl: required("REDIS_URL"),
-    apiPort: Number(process.env.API_PORT ?? 3001),
+    apiPort,
     baseDomain: process.env.BASE_DOMAIN ?? "localhost",
     superadminToken: required("SUPERADMIN_TOKEN"),
     email: {
       from: process.env.EMAIL_FROM ?? "no-reply@localhost",
       resendApiKey: process.env.RESEND_API_KEY,
+    },
+    tokenEncryptionKey: required("TOKEN_ENCRYPTION_KEY"),
+    // Defaults to the Vite dev server, not the API: the callback URL is a *page*
+    // the User is returned to, and the SPA is what renders it.
+    oauthRedirectBaseUrl: process.env.OAUTH_REDIRECT_BASE_URL ?? "http://localhost:5173",
+    meta: {
+      appId: process.env.META_APP_ID,
+      appSecret: process.env.META_APP_SECRET,
     },
   };
 }

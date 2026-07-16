@@ -229,6 +229,22 @@ export async function setUserPassword(
   }
 }
 
+/**
+ * Look up a Client by id, or null.
+ *
+ * The by-id counterpart to {@link findClientBySubdomain}, for the paths that
+ * cannot resolve a tenant from the host: an OAuth callback returning through the
+ * shared redirect URI, and a platform webhook that has no host of ours at all.
+ */
+export async function findClientById(pool: pg.Pool, clientId: string): Promise<Client | null> {
+  const { rows } = await pool.query<ClientRow>(
+    `SELECT ${CLIENT_COLUMNS} FROM clients WHERE id = $1`,
+    [clientId],
+  );
+  const row = rows[0];
+  return row ? clientFromRow(row) : null;
+}
+
 /** Look up a Client by its subdomain, or null. Used to resolve the tenant scope. */
 export async function findClientBySubdomain(
   pool: pg.Pool,

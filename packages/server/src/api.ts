@@ -5,8 +5,9 @@ import { createPool, waitForPostgres } from "./db/pool.js";
 import { runMigrations } from "./db/migrate.js";
 import { buildApp } from "./app.js";
 import { SystemClock } from "./core/clock.js";
-import { FakePublisher } from "./core/fake-publisher.js";
 import { ConsoleEmailSender, ResendEmailSender, type EmailSender } from "./core/email.js";
+import { createSecretCipher, parseEncryptionKey } from "./core/crypto.js";
+import { resolvePublisher } from "./platforms/resolve-publisher.js";
 import {
   HEALTH_QUEUE_NAME,
   redisConnection,
@@ -16,9 +17,9 @@ import {
 /**
  * API process entrypoint. Wires the real dependencies and starts listening.
  *
- * The Publisher is still the {@link FakePublisher} in Slice 1 — the real
- * per-platform transports arrive with the connect flow (Slice 6+). The seam is
- * in place, so swapping it later touches only this wiring.
+ * Every seam is resolved here and injected — the Publisher transport, the token
+ * cipher, the email sender — so nothing downstream reaches for a global or reads
+ * the environment for itself.
  */
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -36,13 +37,18 @@ async function main(): Promise<void> {
     ? new ResendEmailSender(config.email.resendApiKey, config.email.from)
     : new ConsoleEmailSender();
 
+  const clock = new SystemClock();
   const app = buildApp({
     pool,
-    clock: new SystemClock(),
-    publisher: new FakePublisher(),
+    clock,
+    publisher: resolvePublisher(config, clock),
     emailSender,
+    // Fails fast at startup on a bad key, rather than at the first connect.
+    tokenCipher: createSecretCipher(parseEncryptionKey(config.tokenEncryptionKey)),
     baseDomain: config.baseDomain,
     superadminToken: config.superadminToken,
+    oauthRedirectBaseUrl: config.oauthRedirectBaseUrl,
+    metaAppSecret: config.meta.appSecret,
     healthQueue,
   });
 

@@ -1,4 +1,9 @@
 import { useEffect, useState } from "react";
+import { apiFetch, getSessionToken, setSessionToken } from "./api.js";
+import type { Session } from "./session.js";
+import { LoginScreen } from "./LoginScreen.jsx";
+import { Connections } from "./Connections.jsx";
+import { FacebookCallback } from "./FacebookCallback.jsx";
 
 /**
  * A Client's white-label branding, fetched from the API at load and resolved
@@ -21,21 +26,24 @@ const DEFAULT_BRANDING: Branding = {
   logoUrl: null,
 };
 
-interface Health {
-  status: string;
-  time: string;
-}
+/** The path Facebook returns a User to. See `OAUTH_REDIRECT_BASE_URL`. */
+const FACEBOOK_CALLBACK_PATH = "/oauth/facebook/callback";
 
 /**
  * Client SPA shell. Applies the Client's white-label branding (logo, primary
  * color, app name) resolved from the subdomain, so the app feels like the
- * Client's own tool. Branding is applied at load and, on failure, degrades to a
- * neutral default rather than showing nothing. The health probe below proves the
- * SPA → API → Postgres path end-to-end (walking skeleton, Slice 1).
+ * Client's own tool — including on the login screen, before anyone
+ * authenticates. Branding is applied at load and, on failure, degrades to a
+ * neutral default rather than showing nothing.
  */
 export function App() {
   const [branding, setBranding] = useState<Branding>(DEFAULT_BRANDING);
-  const [health, setHealth] = useState<Health | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  // Until the stored token is checked, we don't know whether to show the login
+  // screen — rendering it and then yanking it away would be worse than a beat of
+  // nothing.
+  const [resolvingSession, setResolvingSession] = useState(true);
+  const [path, setPath] = useState(window.location.pathname);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,13 +62,30 @@ export function App() {
         /* keep DEFAULT_BRANDING */
       });
 
-    fetch("/api/health")
-      .then((r) => (r.ok ? (r.json() as Promise<Health>) : null))
-      .then((h) => {
-        if (!cancelled && h) setHealth(h);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Restore a session from a stored token. It may have expired, or the Client
+  // may have been suspended since — in which case /api/me refuses it and we fall
+  // back to the login screen, which then explains why.
+  useEffect(() => {
+    let cancelled = false;
+    if (!getSessionToken()) {
+      setResolvingSession(false);
+      return;
+    }
+
+    apiFetch<Session>("/api/me")
+      .then((me) => {
+        if (!cancelled) setSession({ ...me, token: getSessionToken()! });
       })
       .catch(() => {
-        /* health is a non-blocking probe */
+        setSessionToken(null);
+      })
+      .finally(() => {
+        if (!cancelled) setResolvingSession(false);
       });
 
     return () => {
@@ -74,6 +99,17 @@ export function App() {
     document.title = branding.appName;
   }, [branding.appName]);
 
+  function signOut() {
+    setSessionToken(null);
+    setSession(null);
+  }
+
+  /** Leave the OAuth callback URL behind, so a reload doesn't replay it. */
+  function returnToWorkspace() {
+    window.history.replaceState({}, "", "/");
+    setPath("/");
+  }
+
   return (
     <main
       style={{
@@ -84,7 +120,15 @@ export function App() {
         ["--brand-primary" as string]: branding.primaryColor,
       }}
     >
-      <header style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          borderBottom: "1px solid #e2e8f0",
+          paddingBottom: "1rem",
+        }}
+      >
         {branding.logoUrl && (
           <img
             src={branding.logoUrl}
@@ -96,14 +140,34 @@ export function App() {
         <h1 style={{ color: "var(--brand-primary)", margin: 0 }} data-testid="brand-name">
           {branding.appName}
         </h1>
+
+        {session && (
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "1rem" }}>
+            <span style={{ fontSize: "0.875rem", color: "#64748b" }}>{session.user.email}</span>
+            <button onClick={signOut} style={linkButtonStyle}>
+              Sign out
+            </button>
+          </div>
+        )}
       </header>
 
-      {health && (
-        <p style={{ marginTop: "2rem", color: "#64748b" }}>
-          API health: <strong data-testid="health-status">{health.status}</strong> (as of{" "}
-          {health.time})
-        </p>
+      {resolvingSession ? null : !session ? (
+        <LoginScreen onLoggedIn={setSession} />
+      ) : path === FACEBOOK_CALLBACK_PATH ? (
+        <FacebookCallback onDone={returnToWorkspace} />
+      ) : (
+        <Connections />
       )}
     </main>
   );
 }
+
+const linkButtonStyle = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  color: "#64748b",
+  fontSize: "0.875rem",
+  textDecoration: "underline",
+  cursor: "pointer",
+} as const;

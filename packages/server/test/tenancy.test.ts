@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildApp } from "../src/app.js";
+import { buildTestApp } from "./helpers/app.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { FakeEmailSender } from "../src/core/fake-email.js";
@@ -26,7 +26,7 @@ describe("Tenancy spine: provisioning, subdomain tenancy, login", () => {
 
   beforeAll(async () => {
     db = await startTestPostgres();
-    app = buildApp({
+    app = buildTestApp({
       pool: db.pool,
       clock,
       publisher: new FakePublisher(),

@@ -1,15 +1,19 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
+import formbody from "@fastify/formbody";
 import type pg from "pg";
 import { Queue } from "bullmq";
 import type { Clock } from "./core/clock.js";
 import type { Publisher } from "./core/publisher.js";
 import type { EmailSender } from "./core/email.js";
+import type { SecretCipher } from "./core/crypto.js";
 import { type HealthJobData } from "./queue/health-queue.js";
 import { registerSuperadminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPlatformRoutes } from "./routes/platforms.js";
 import { registerBrandingRoutes } from "./routes/branding.js";
+import { registerConnectionRoutes } from "./routes/connections.js";
+import { registerWebhookRoutes } from "./routes/webhooks.js";
 
 /**
  * Everything the HTTP app depends on, injected at construction. This is what
@@ -24,10 +28,33 @@ export interface AppDeps {
   publisher: Publisher;
   /** Sends transactional email (password-reset links). Faked in tests. */
   emailSender: EmailSender;
+  /**
+   * Encrypts platform tokens at rest (ADR 0006). Its key comes from the
+   * environment, never the DB — injected here so it is never a global.
+   */
+  tokenCipher: SecretCipher;
   /** Base domain for subdomain routing (e.g. `ourapp.com`, or `localhost` in dev). */
   baseDomain: string;
   /** Shared secret gating the Superadmin `admin.` surface. */
   superadminToken: string;
+  /**
+   * Origin of the canonical OAuth callback surface (e.g.
+   * `https://connect.ourapp.com`). One fixed redirect URI per platform is
+   * derived from it — Meta will not whitelist a wildcard, so every Client's
+   * handshake comes back through this one host and is re-tenanted from the
+   * `oauth_states` row rather than from the host it landed on.
+   */
+  oauthRedirectBaseUrl: string;
+  /**
+   * Our Meta app secret. Only Meta and we know it, which is what lets the public
+   * deauthorization callback verify that a request really is Meta's. Read from
+   * the environment / a secrets manager, never committed (ADR 0006).
+   *
+   * Optional because a local checkout has no Meta app. Absent, the callback
+   * refuses everything rather than verifying against an empty secret — a
+   * signature anyone could compute is worse than no endpoint at all.
+   */
+  metaAppSecret?: string;
   /** The health queue. Optional so pure-HTTP tests can omit Redis entirely. */
   healthQueue?: Queue<HealthJobData>;
 }
@@ -43,6 +70,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.decorate("deps", deps);
 
   app.register(cors, { origin: true });
+  // Meta posts its callbacks form-encoded, not as JSON.
+  app.register(formbody);
 
   // The tenancy spine (Slice 2): Superadmin provisioning on the `admin.` surface
   // and Client-scoped User login on each Client subdomain.
@@ -53,6 +82,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Public white-label branding surface (Slice 5): resolved from the subdomain,
   // fetched by the SPA at load so the app looks like the Client's own tool.
   app.register(registerBrandingRoutes);
+  // Connected Accounts (Slice 6): the OAuth connect flow, connection status, and
+  // the platform callbacks that end a connection from the platform's side.
+  app.register(registerConnectionRoutes);
+  app.register(registerWebhookRoutes);
 
   app.get("/api/health", async () => {
     const { pool, clock } = app.deps;
