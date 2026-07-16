@@ -9,6 +9,7 @@ import { type HealthJobData } from "./queue/health-queue.js";
 import { registerSuperadminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPlatformRoutes } from "./routes/platforms.js";
+import { registerBrandingRoutes } from "./routes/branding.js";
 
 /**
  * Everything the HTTP app depends on, injected at construction. This is what
@@ -49,6 +50,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   app.register(registerAuthRoutes);
   // Plan-gated platform surface (Slice 3): what a Client's Plan lets it see/act on.
   app.register(registerPlatformRoutes);
+  // Public white-label branding surface (Slice 5): resolved from the subdomain,
+  // fetched by the SPA at load so the app looks like the Client's own tool.
+  app.register(registerBrandingRoutes);
 
   app.get("/api/health", async () => {
     const { pool, clock } = app.deps;

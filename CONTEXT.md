@@ -45,6 +45,15 @@ manually off-platform — there is no payment gateway; the Superadmin flips the
 access status by hand on non-payment or expiry.
 _Avoid_: Subscription, Tier, Package, Entitlement, Feature flag
 
+**Branding**:
+The Superadmin-configured white-label look of a Client: its logo, primary color,
+and app display name. A strict 1:1 with the Client. Resolved from the subdomain
+and applied by the Client SPA at load — including on the login screen, before
+anyone authenticates — so the app feels like the Client's own tool and shows no
+operator identity anywhere on a Client surface. A Client that sets nothing falls
+back to a neutral default that names no operator.
+_Avoid_: Theme, Skin, White-label config, Customization
+
 **Post**:
 A single piece of content a User composes once and sends to one or more of the
 Client's Connected Accounts together — immediately or at a scheduled time. Its

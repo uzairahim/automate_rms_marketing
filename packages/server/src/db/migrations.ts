@@ -122,4 +122,24 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX password_reset_tokens_user_id ON password_reset_tokens (user_id);
     `,
   },
+  {
+    // Slice 5 — light white-label branding. A Client's branding (logo, primary
+    // color, app display name) is a strict 1:1 with the Client, so it lives as
+    // columns on `clients` alongside the Plan. All three are nullable: NULL means
+    // "no custom value set", and the read path falls back to a neutral default
+    // that mentions no operator (CONTEXT.md `Client`, `Superadmin`). The SPA
+    // resolves branding from the subdomain and fetches it at load.
+    name: "005_client_branding",
+    sql: /* sql */ `
+      ALTER TABLE clients
+        ADD COLUMN app_name       text,
+        -- The DB is the source of truth for the stored form: a non-null color is
+        -- a normalized #rrggbb hex (mirrors the access_status CHECK). NULL — the
+        -- "unset, use default" state — is allowed through.
+        ADD COLUMN primary_color  text
+          CONSTRAINT clients_primary_color_check
+          CHECK (primary_color IS NULL OR primary_color ~ '^#[0-9a-f]{6}$'),
+        ADD COLUMN logo_url       text;
+    `,
+  },
 ];

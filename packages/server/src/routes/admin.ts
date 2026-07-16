@@ -10,6 +10,13 @@ import {
   type ProvisionErrorCode,
 } from "../tenancy/clients.js";
 import { isAccessStatus, updatePlan, type PlanPatch } from "../tenancy/plan.js";
+import {
+  normalizeAppName,
+  normalizeLogoUrl,
+  normalizePrimaryColor,
+  updateBranding,
+  type BrandingPatch,
+} from "../tenancy/branding.js";
 
 /**
  * The Superadmin `admin.` API surface (PRD stories 1, 5, 7, 12).
@@ -28,6 +35,9 @@ const HTTP_STATUS: Record<ProvisionErrorCode, number> = {
   weak_password: 400,
   invalid_plan: 400,
   invalid_access_status: 400,
+  invalid_app_name: 400,
+  invalid_primary_color: 400,
+  invalid_logo_url: 400,
   subdomain_taken: 409,
   email_taken: 409,
   client_not_found: 404,
@@ -59,6 +69,37 @@ function parsePlanPatch(body: Record<string, unknown>): PlanPatch {
     }
     patch.accessStatus = status;
   }
+  return patch;
+}
+
+/**
+ * Parse a branding-patch request body into a typed {@link BrandingPatch}. Each
+ * field is tri-state: absent leaves the stored value untouched, an explicit
+ * `null` resets it to the neutral default (or clears the logo), and a string is
+ * validated and normalized. A malformed value is a 400 via {@link ProvisionError}.
+ */
+function parseBrandingPatch(body: Record<string, unknown>): BrandingPatch {
+  const patch: BrandingPatch = {};
+
+  if ("appName" in body) {
+    const value = body.appName;
+    if (value === null) patch.appName = null;
+    else if (typeof value === "string") patch.appName = normalizeAppName(value);
+    else throw new ProvisionError("invalid_app_name", "appName must be a string or null.");
+  }
+  if ("primaryColor" in body) {
+    const value = body.primaryColor;
+    if (value === null) patch.primaryColor = null;
+    else if (typeof value === "string") patch.primaryColor = normalizePrimaryColor(value);
+    else throw new ProvisionError("invalid_primary_color", "primaryColor must be a string or null.");
+  }
+  if ("logoUrl" in body) {
+    const value = body.logoUrl;
+    if (value === null) patch.logoUrl = null;
+    else if (typeof value === "string") patch.logoUrl = normalizeLogoUrl(value);
+    else throw new ProvisionError("invalid_logo_url", "logoUrl must be a string or null.");
+  }
+
   return patch;
 }
 
@@ -157,6 +198,31 @@ export async function registerSuperadminRoutes(app: FastifyInstance): Promise<vo
       try {
         const plan = await updatePlan(app.deps.pool, request.params.clientId, patch);
         return reply.code(200).send({ id: request.params.clientId, plan });
+      } catch (err) {
+        if (err instanceof ProvisionError) return sendProvisionError(reply, err);
+        throw err;
+      }
+    },
+  );
+
+  // Set a Client's white-label branding (PRD story 5): logo, primary color, and
+  // app display name. Any subset of fields may be sent; an explicit null resets
+  // that field to the neutral default. The Client SPA fetches the resolved
+  // branding from its subdomain at load (GET /api/branding).
+  app.patch<{ Params: { clientId: string }; Body: Record<string, unknown> }>(
+    "/api/admin/clients/:clientId/branding",
+    { preHandler: guard },
+    async (request, reply) => {
+      let patch: BrandingPatch;
+      try {
+        patch = parseBrandingPatch(request.body ?? {});
+      } catch (err) {
+        if (err instanceof ProvisionError) return sendProvisionError(reply, err);
+        throw err;
+      }
+      try {
+        const branding = await updateBranding(app.deps.pool, request.params.clientId, patch);
+        return reply.code(200).send({ id: request.params.clientId, branding });
       } catch (err) {
         if (err instanceof ProvisionError) return sendProvisionError(reply, err);
         throw err;
