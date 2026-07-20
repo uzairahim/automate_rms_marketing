@@ -9,6 +9,8 @@ import { createSecretCipher, parseEncryptionKey } from "./core/crypto.js";
 import { resolvePublisher } from "./platforms/resolve-publisher.js";
 import { scheduleTokenRefresh } from "./queue/token-refresh-queue.js";
 import { startTokenRefreshWorker } from "./worker/token-refresh-worker.js";
+import { schedulePostRetry } from "./queue/post-retry-queue.js";
+import { startPostRetryWorker } from "./worker/post-retry-worker.js";
 
 /**
  * Worker process entrypoint. It runs the recurring jobs the PRD calls for: the
@@ -28,13 +30,18 @@ async function main(): Promise<void> {
   // same seams the API wires, injected identically here.
   const clock = new SystemClock();
   const tokenRefreshQueue = await scheduleTokenRefresh(connection);
+  const publisher = resolvePublisher(config, clock);
   const tokenRefreshWorker = startTokenRefreshWorker({
     pool,
     clock,
     cipher: createSecretCipher(parseEncryptionKey(config.tokenEncryptionKey)),
-    publisher: resolvePublisher(config, clock),
+    publisher,
     connection,
   });
+
+  // Auto-retries a failed Target twice at one-minute intervals (Slice 8).
+  const postRetryQueue = await schedulePostRetry(connection);
+  const postRetryWorker = startPostRetryWorker({ pool, clock, publisher, connection });
 
   healthWorker.on("ready", () => console.log("Health worker ready"));
   healthWorker.on("failed", (job, err) =>
@@ -44,11 +51,17 @@ async function main(): Promise<void> {
   tokenRefreshWorker.on("failed", (job, err) =>
     console.error(`Token refresh job ${job?.id} failed:`, err),
   );
+  postRetryWorker.on("ready", () => console.log("Post retry worker ready"));
+  postRetryWorker.on("failed", (job, err) =>
+    console.error(`Post retry job ${job?.id} failed:`, err),
+  );
 
   const shutdown = async () => {
     await healthWorker.close();
     await tokenRefreshWorker.close();
     await tokenRefreshQueue.close();
+    await postRetryWorker.close();
+    await postRetryQueue.close();
     await pool.end();
     process.exit(0);
   };

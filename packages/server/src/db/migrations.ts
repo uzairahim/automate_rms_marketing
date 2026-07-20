@@ -221,4 +221,76 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX oauth_states_client_id ON oauth_states (client_id);
     `,
   },
+  {
+    // Slice 8 — compose, validate-and-gate, and immediate publish.
+    //
+    // A Post is authored once and fans out to one Target per selected platform
+    // (CONTEXT.md 'Post', 'Target'). `status` carries the full vocabulary the PRD
+    // names for a Post up front — Draft/Scheduled arrive with Slice 10's
+    // scheduler, but the CHECK is defined once here rather than altered later.
+    //
+    // A Target's own lifecycle is smaller: `pending` until it has a terminal
+    // outcome, then `published` or `failed`. `retry_count`/`next_retry_at` drive
+    // the 2x-at-1-minute auto-retry, found by querying "due" each tick — the same
+    // no-timers-in-memory approach as the token-refresh job.
+    name: "007_posts_and_targets",
+    sql: /* sql */ `
+      CREATE TABLE posts (
+        id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        client_id   uuid NOT NULL REFERENCES clients (id) ON DELETE CASCADE,
+        author_id   uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+        text        text NOT NULL DEFAULT '',
+        -- The attached Media's public URL and kind. Both null together (text-only)
+        -- or both set — a Post never has one without the other. Full upload/serve/
+        -- purge lifecycle (ADR 0003) is Slice 9; for now this is simply what a
+        -- Target is told to publish.
+        media_url   text,
+        media_type  text CHECK (media_type IN ('image', 'video')),
+        CONSTRAINT posts_media_paired_check
+          CHECK ((media_url IS NULL) = (media_type IS NULL)),
+        status      text NOT NULL DEFAULT 'draft'
+          CONSTRAINT posts_status_check
+          CHECK (status IN
+            ('draft', 'scheduled', 'publishing', 'published', 'partially_published', 'failed')),
+        created_at  timestamptz NOT NULL DEFAULT now(),
+        updated_at  timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX posts_client_id ON posts (client_id);
+
+      CREATE TABLE targets (
+        id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        post_id        uuid NOT NULL REFERENCES posts (id) ON DELETE CASCADE,
+        platform       text NOT NULL
+          CONSTRAINT targets_platform_check
+          CHECK (platform IN ('facebook', 'instagram', 'tiktok')),
+        status         text NOT NULL DEFAULT 'pending'
+          CONSTRAINT targets_status_check
+          CHECK (status IN ('pending', 'published', 'failed')),
+        -- The platform's durable post/media id and permalink, persisted only on
+        -- success (PRD story 46 reads the id back later for a history thumbnail).
+        external_id    text,
+        permalink      text,
+        -- The most recent attempt's failure reason, surfaced for a manual retry.
+        -- Cleared on success; kept (not appended) on repeated failure, since only
+        -- the latest reason is ever shown.
+        error          text,
+        -- How many *auto* retries have already run (0, 1, or 2 — never more: the
+        -- PRD caps auto-retry at two, then leaves the Target for a manual one).
+        retry_count    integer NOT NULL DEFAULT 0,
+        -- When the next auto-retry is due. Null once terminal (published/failed)
+        -- or before any failure has happened yet.
+        next_retry_at  timestamptz,
+        updated_at     timestamptz NOT NULL DEFAULT now(),
+        -- One Target per platform per Post — the fan-out is exactly the selected
+        -- platform set, never duplicated.
+        CONSTRAINT targets_post_platform_key UNIQUE (post_id, platform)
+      );
+      CREATE INDEX targets_post_id ON targets (post_id);
+      -- The retry job's due-query: only a pending Target with a scheduled retry
+      -- can ever be due, mirroring connected_accounts_token_expires_at.
+      CREATE INDEX targets_next_retry_at
+        ON targets (next_retry_at)
+        WHERE status = 'pending' AND next_retry_at IS NOT NULL;
+    `,
+  },
 ];

@@ -14,6 +14,7 @@ import { registerPlatformRoutes } from "./routes/platforms.js";
 import { registerBrandingRoutes } from "./routes/branding.js";
 import { registerConnectionRoutes } from "./routes/connections.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
+import { registerPostRoutes } from "./routes/posts.js";
 
 /**
  * Everything the HTTP app depends on, injected at construction. This is what
@@ -86,6 +87,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // the platform callbacks that end a connection from the platform's side.
   app.register(registerConnectionRoutes);
   app.register(registerWebhookRoutes);
+  // Compose + validate-and-gate + immediate publish (Slice 8): a Post fans out
+  // to one Target per selected platform through the same Publisher seam.
+  app.register(registerPostRoutes);
 
   app.get("/api/health", async () => {
     const { pool, clock } = app.deps;

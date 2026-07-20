@@ -1,0 +1,273 @@
+import type pg from "pg";
+import type { Clock } from "../core/clock.js";
+import type { Platform } from "../core/publisher.js";
+import type { ComposedMedia } from "./validation.js";
+
+/**
+ * The Post/Target store (CONTEXT.md `Post`, `Target`).
+ *
+ * A Post is authored once and fans out to one Target per selected platform.
+ * Each Target's outcome is recorded independently — a successful Target is
+ * never rolled back because another failed — and {@link rollupStatus} derives
+ * the Post's own status from the Targets underneath it, rather than the Post
+ * carrying an independent status a caller could let drift out of sync.
+ */
+
+/**
+ * `draft`/`scheduled` arrive with Slice 10 — nothing here produces them yet,
+ * but the vocabulary is CONTEXT.md's in full so the type never needs revisiting.
+ * `publishing` covers a Post with any Target still `pending` (including one
+ * awaiting an auto-retry); `published`/`partially_published`/`failed` are the
+ * terminal roll-ups once every Target has settled (see {@link rollupStatus}).
+ */
+export const POST_STATUSES = [
+  "draft",
+  "scheduled",
+  "publishing",
+  "published",
+  "partially_published",
+  "failed",
+] as const;
+export type PostStatus = (typeof POST_STATUSES)[number];
+
+/**
+ * Smaller than a Post's: a Target only ever *becomes* `pending` (freshly
+ * created, or scheduled for an auto-retry after a failure) and then settles
+ * once, terminally, into `published` or `failed`.
+ */
+export const TARGET_STATUSES = ["pending", "published", "failed"] as const;
+export type TargetStatus = (typeof TARGET_STATUSES)[number];
+
+export interface Post {
+  id: string;
+  clientId: string;
+  authorId: string;
+  text: string;
+  media: ComposedMedia | null;
+  status: PostStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Target {
+  id: string;
+  postId: string;
+  platform: Platform;
+  status: TargetStatus;
+  externalId: string | null;
+  permalink: string | null;
+  error: string | null;
+  retryCount: number;
+  nextRetryAt: string | null;
+  updatedAt: string;
+}
+
+interface PostRow {
+  id: string;
+  client_id: string;
+  author_id: string;
+  text: string;
+  media_url: string | null;
+  media_type: string | null;
+  status: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface TargetRow {
+  id: string;
+  post_id: string;
+  platform: string;
+  status: string;
+  external_id: string | null;
+  permalink: string | null;
+  error: string | null;
+  retry_count: number;
+  next_retry_at: Date | null;
+  updated_at: Date;
+}
+
+const POST_COLUMNS = `id, client_id, author_id, text, media_url, media_type, status, created_at, updated_at`;
+const TARGET_COLUMNS = `id, post_id, platform, status, external_id, permalink, error, retry_count, next_retry_at, updated_at`;
+
+function postFromRow(row: PostRow): Post {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    authorId: row.author_id,
+    text: row.text,
+    media:
+      row.media_url && row.media_type
+        ? { url: row.media_url, type: row.media_type as "image" | "video" }
+        : null,
+    status: row.status as PostStatus,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+function targetFromRow(row: TargetRow): Target {
+  return {
+    id: row.id,
+    postId: row.post_id,
+    platform: row.platform as Platform,
+    status: row.status as TargetStatus,
+    externalId: row.external_id,
+    permalink: row.permalink,
+    error: row.error,
+    retryCount: row.retry_count,
+    nextRetryAt: row.next_retry_at?.toISOString() ?? null,
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+/** Create a Post and its Targets — one per selected platform, all `pending`. */
+export async function createPost(
+  pool: pg.Pool,
+  clock: Clock,
+  input: {
+    clientId: string;
+    authorId: string;
+    text: string;
+    media: ComposedMedia | null;
+    platforms: readonly Platform[];
+  },
+): Promise<{ post: Post; targets: Target[] }> {
+  const now = clock.now().toISOString();
+  const { rows } = await pool.query<PostRow>(
+    `INSERT INTO posts (client_id, author_id, text, media_url, media_type, status, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, 'publishing', $6, $6)
+     RETURNING ${POST_COLUMNS}`,
+    [
+      input.clientId,
+      input.authorId,
+      input.text,
+      input.media?.url ?? null,
+      input.media?.type ?? null,
+      now,
+    ],
+  );
+  const post = postFromRow(rows[0]!);
+
+  const targets: Target[] = [];
+  for (const platform of input.platforms) {
+    const { rows: targetRows } = await pool.query<TargetRow>(
+      `INSERT INTO targets (post_id, platform, status, updated_at)
+       VALUES ($1, $2, 'pending', $3)
+       RETURNING ${TARGET_COLUMNS}`,
+      [post.id, platform, now],
+    );
+    targets.push(targetFromRow(targetRows[0]!));
+  }
+  return { post, targets };
+}
+
+/** A Post scoped to a Client — never lets one Client read another's Post. */
+export async function findPost(
+  pool: pg.Pool,
+  clientId: string,
+  postId: string,
+): Promise<Post | null> {
+  const { rows } = await pool.query<PostRow>(
+    `SELECT ${POST_COLUMNS} FROM posts WHERE id = $1 AND client_id = $2`,
+    [postId, clientId],
+  );
+  const row = rows[0];
+  return row ? postFromRow(row) : null;
+}
+
+/** A Post's Targets, in the order they were created (platform fan-out order). */
+export async function listTargets(pool: pg.Pool, postId: string): Promise<Target[]> {
+  const { rows } = await pool.query<TargetRow>(
+    `SELECT ${TARGET_COLUMNS} FROM targets WHERE post_id = $1 ORDER BY updated_at ASC, platform ASC`,
+    [postId],
+  );
+  return rows.map(targetFromRow);
+}
+
+/** One Target of a Post, by platform. */
+export async function findTarget(
+  pool: pg.Pool,
+  postId: string,
+  platform: Platform,
+): Promise<Target | null> {
+  const { rows } = await pool.query<TargetRow>(
+    `SELECT ${TARGET_COLUMNS} FROM targets WHERE post_id = $1 AND platform = $2`,
+    [postId, platform],
+  );
+  const row = rows[0];
+  return row ? targetFromRow(row) : null;
+}
+
+/** Targets whose scheduled auto-retry is due, across every Post — the job's query. */
+export async function findDueTargets(pool: pg.Pool, asOf: Date): Promise<Target[]> {
+  const { rows } = await pool.query<TargetRow>(
+    `SELECT ${TARGET_COLUMNS} FROM targets
+     WHERE status = 'pending' AND next_retry_at IS NOT NULL AND next_retry_at <= $1
+     ORDER BY next_retry_at ASC`,
+    [asOf.toISOString()],
+  );
+  return rows.map(targetFromRow);
+}
+
+/** Persist the outcome of one publish attempt against a Target. */
+export async function recordTargetOutcome(
+  pool: pg.Pool,
+  clock: Clock,
+  targetId: string,
+  outcome: {
+    status: TargetStatus;
+    externalId: string | null;
+    permalink: string | null;
+    error: string | null;
+    retryCount: number;
+    nextRetryAt: Date | null;
+  },
+): Promise<Target> {
+  const { rows } = await pool.query<TargetRow>(
+    `UPDATE targets SET
+       status        = $2,
+       external_id   = $3,
+       permalink     = $4,
+       error         = $5,
+       retry_count   = $6,
+       next_retry_at = $7,
+       updated_at    = $8
+     WHERE id = $1
+     RETURNING ${TARGET_COLUMNS}`,
+    [
+      targetId,
+      outcome.status,
+      outcome.externalId,
+      outcome.permalink,
+      outcome.error,
+      outcome.retryCount,
+      outcome.nextRetryAt?.toISOString() ?? null,
+      clock.now().toISOString(),
+    ],
+  );
+  return targetFromRow(rows[0]!);
+}
+
+/** The Post status derived from its Targets' outcomes (CONTEXT.md `Post status`). */
+export function rollupStatus(targetStatuses: readonly TargetStatus[]): PostStatus {
+  if (targetStatuses.some((status) => status === "pending")) return "publishing";
+  const publishedCount = targetStatuses.filter((status) => status === "published").length;
+  if (publishedCount === targetStatuses.length) return "published";
+  if (publishedCount === 0) return "failed";
+  return "partially_published";
+}
+
+/** Persist a Post's roll-up status, recomputed from its current Targets. */
+export async function updatePostStatus(
+  pool: pg.Pool,
+  clock: Clock,
+  postId: string,
+  status: PostStatus,
+): Promise<void> {
+  await pool.query(`UPDATE posts SET status = $2, updated_at = $3 WHERE id = $1`, [
+    postId,
+    status,
+    clock.now().toISOString(),
+  ]);
+}
