@@ -35,6 +35,7 @@ export async function retryDueTargets(
   pool: pg.Pool,
   clock: Clock,
   publisher: Publisher,
+  mediaDir: string,
 ): Promise<RetryOutcome> {
   const due = await findDueTargets(pool, clock.now());
   const outcome: RetryOutcome = { attempted: 0, published: 0, failed: 0 };
@@ -58,7 +59,7 @@ export async function retryDueTargets(
   }
 
   for (const postId of affectedPosts) {
-    await recomputePostStatus(pool, clock, postId);
+    await recomputePostStatus(pool, clock, mediaDir, postId);
   }
 
   return outcome;

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 /**
  * Runtime configuration read from the environment.
  *
@@ -62,6 +64,19 @@ export interface Config {
     clientKey?: string;
     clientSecret?: string;
   };
+  /**
+   * Directory on this server's disk where uploaded Media files live (ADR 0003
+   * — no object store). Media is ephemeral: purged once its Post's Targets
+   * settle, so this never needs to be durable/shared storage.
+   */
+  mediaDir: string;
+  /**
+   * This API's own public HTTPS origin, used to build the Media URL Meta/TikTok
+   * fetch by (`{mediaBaseUrl}/api/media/:id`). Fixed and un-tenanted — like
+   * `oauthRedirectBaseUrl`, the platform fetches this directly, never through a
+   * Client subdomain.
+   */
+  mediaBaseUrl: string;
 }
 
 function required(name: string): string {
@@ -97,5 +112,7 @@ export function loadConfig(): Config {
       clientKey: process.env.TIKTOK_CLIENT_KEY,
       clientSecret: process.env.TIKTOK_CLIENT_SECRET,
     },
+    mediaDir: process.env.MEDIA_DIR ?? path.join(process.cwd(), "data", "media"),
+    mediaBaseUrl: process.env.MEDIA_BASE_URL ?? `http://localhost:${apiPort}`,
   };
 }

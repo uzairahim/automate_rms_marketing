@@ -11,6 +11,8 @@ import { scheduleTokenRefresh } from "./queue/token-refresh-queue.js";
 import { startTokenRefreshWorker } from "./worker/token-refresh-worker.js";
 import { schedulePostRetry } from "./queue/post-retry-queue.js";
 import { startPostRetryWorker } from "./worker/post-retry-worker.js";
+import { scheduleMediaPurge } from "./queue/media-purge-queue.js";
+import { startMediaPurgeWorker } from "./worker/media-purge-worker.js";
 
 /**
  * Worker process entrypoint. It runs the recurring jobs the PRD calls for: the
@@ -41,7 +43,19 @@ async function main(): Promise<void> {
 
   // Auto-retries a failed Target twice at one-minute intervals (Slice 8).
   const postRetryQueue = await schedulePostRetry(connection);
-  const postRetryWorker = startPostRetryWorker({ pool, clock, publisher, connection });
+  const postRetryWorker = startPostRetryWorker({
+    pool,
+    clock,
+    publisher,
+    mediaDir: config.mediaDir,
+    connection,
+  });
+
+  // Purges Media 24 hours after a partial/total publish failure (Slice 9;
+  // ADR 0003). Immediate purges on full success happen inline when a Post's
+  // Target roll-up settles, so this tick only ever finds the delayed case.
+  const mediaPurgeQueue = await scheduleMediaPurge(connection);
+  const mediaPurgeWorker = startMediaPurgeWorker({ pool, clock, mediaDir: config.mediaDir, connection });
 
   healthWorker.on("ready", () => console.log("Health worker ready"));
   healthWorker.on("failed", (job, err) =>
@@ -55,6 +69,10 @@ async function main(): Promise<void> {
   postRetryWorker.on("failed", (job, err) =>
     console.error(`Post retry job ${job?.id} failed:`, err),
   );
+  mediaPurgeWorker.on("ready", () => console.log("Media purge worker ready"));
+  mediaPurgeWorker.on("failed", (job, err) =>
+    console.error(`Media purge job ${job?.id} failed:`, err),
+  );
 
   const shutdown = async () => {
     await healthWorker.close();
@@ -62,6 +80,8 @@ async function main(): Promise<void> {
     await tokenRefreshQueue.close();
     await postRetryWorker.close();
     await postRetryQueue.close();
+    await mediaPurgeWorker.close();
+    await mediaPurgeQueue.close();
     await pool.end();
     process.exit(0);
   };

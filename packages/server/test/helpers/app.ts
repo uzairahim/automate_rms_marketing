@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import { buildApp, type AppDeps } from "../../src/app.js";
 import { TestClock } from "../../src/core/clock.js";
@@ -22,6 +25,7 @@ export const TEST_BASE_DOMAIN = "ourapp.test";
 export const TEST_SUPERADMIN_TOKEN = "test-superadmin-token";
 export const TEST_META_APP_SECRET = "test-meta-app-secret";
 export const TEST_OAUTH_REDIRECT_BASE_URL = "https://connect.ourapp.test";
+export const TEST_MEDIA_BASE_URL = "https://media.ourapp.test";
 
 /** Build the app, overriding only the dependencies a suite actually exercises. */
 export function buildTestApp(overrides: Partial<AppDeps> & Pick<AppDeps, "pool">): FastifyInstance {
@@ -34,6 +38,10 @@ export function buildTestApp(overrides: Partial<AppDeps> & Pick<AppDeps, "pool">
     superadminToken: TEST_SUPERADMIN_TOKEN,
     oauthRedirectBaseUrl: TEST_OAUTH_REDIRECT_BASE_URL,
     metaAppSecret: TEST_META_APP_SECRET,
+    // A fresh throwaway directory per app build — Media is real disk I/O in
+    // tests (like the ephemeral Postgres/Redis), not faked.
+    mediaDir: mkdtempSync(path.join(tmpdir(), "smma-media-")),
+    mediaBaseUrl: TEST_MEDIA_BASE_URL,
     ...overrides,
   });
 }

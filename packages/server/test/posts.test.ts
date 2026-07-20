@@ -29,6 +29,7 @@ const PAGE_WITH_IG: PageSpec = {
 describe("Compose + validate-and-gate + immediate publish", () => {
   let db: TestPostgres;
   let app: FastifyInstance;
+  let mediaDir: string;
   const clock = new TestClock(NOW);
   const publisher = new FakePublisher();
 
@@ -38,6 +39,7 @@ describe("Compose + validate-and-gate + immediate publish", () => {
     db = await startTestPostgres();
     app = buildTestApp({ pool: db.pool, clock, publisher });
     await app.ready();
+    mediaDir = app.deps.mediaDir;
   });
 
   afterAll(async () => {
@@ -47,11 +49,27 @@ describe("Compose + validate-and-gate + immediate publish", () => {
 
   beforeEach(async () => {
     await db.pool.query(
-      "TRUNCATE clients, users, sessions, connected_accounts, oauth_states, posts RESTART IDENTITY CASCADE",
+      "TRUNCATE clients, users, sessions, connected_accounts, oauth_states, posts, media RESTART IDENTITY CASCADE",
     );
     publisher.reset();
     clock.set(NOW);
   });
+
+  /** Upload an image/video and return its mediaId, for compose's `media: { mediaId }`. */
+  async function uploadMedia(
+    auth: Record<string, string>,
+    contentType: string,
+    bytes = Buffer.from("fake-bytes"),
+  ): Promise<string> {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/media",
+      headers: { ...auth, "content-type": contentType },
+      payload: bytes,
+    });
+    expect(res.statusCode).toBe(201);
+    return res.json().id as string;
+  }
 
   /** Provision a Client + User with the given Plan, and log in. */
   async function client(
@@ -157,10 +175,11 @@ describe("Compose + validate-and-gate + immediate publish", () => {
     it("blocks an image-only Post to TikTok — it specifically requires a video", async () => {
       const { auth } = await client();
       await connectPlatforms(auth, ["tiktok"]);
+      const mediaId = await uploadMedia(auth, "image/png");
 
       const res = await compose(auth, {
         text: "hello",
-        media: { url: "https://example.test/pic.jpg", type: "image" },
+        media: { mediaId },
         platforms: ["tiktok"],
       });
 
@@ -190,10 +209,11 @@ describe("Compose + validate-and-gate + immediate publish", () => {
     it("checks the union of every selected platform's rules at once", async () => {
       const { auth } = await client();
       await connectPlatforms(auth, ["facebook", "instagram", "tiktok"]);
+      const mediaId = await uploadMedia(auth, "image/png");
 
       const res = await compose(auth, {
         text: "hello",
-        media: { url: "https://example.test/pic.jpg", type: "image" },
+        media: { mediaId },
         platforms: ["facebook", "instagram", "tiktok"],
       });
 
@@ -209,11 +229,25 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       expect(res.json().error).toBe("no_platforms_selected");
     });
 
-    it("rejects malformed media", async () => {
+    it("rejects composing with a mediaId that was never uploaded", async () => {
       const { auth } = await client();
       const res = await compose(auth, {
         text: "hello",
-        media: { url: "https://example.test/pic.jpg", type: "audio" },
+        media: { mediaId: "00000000-0000-0000-0000-000000000000" },
+        platforms: ["facebook"],
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("invalid_media");
+    });
+
+    it("rejects composing with another Client's mediaId", async () => {
+      const acme = await client("acme");
+      const globex = await client("globex", { facebook: true, instagram: true, tiktok: true });
+      const mediaId = await uploadMedia(acme.auth, "image/png");
+
+      const res = await compose(globex.auth, {
+        text: "hello",
+        media: { mediaId },
         platforms: ["facebook"],
       });
       expect(res.statusCode).toBe(400);
@@ -255,10 +289,11 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       publisher.scriptSuccess("facebook", "fb-post-1", "https://facebook.test/p/1");
       publisher.scriptSuccess("instagram", "ig-post-1");
       publisher.scriptSuccess("tiktok", "tt-post-1");
+      const mediaId = await uploadMedia(auth, "video/mp4");
 
       const res = await compose(auth, {
         text: "New arrivals!",
-        media: { url: "https://example.test/vid.mp4", type: "video" },
+        media: { mediaId },
         platforms: ["facebook", "instagram", "tiktok"],
       });
 
@@ -293,10 +328,11 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       await connectPlatforms(auth, ["facebook", "tiktok"]);
       publisher.scriptSuccess("facebook", "fb-ok");
       publisher.scriptFailure("tiktok", "TikTok rejected the video.");
+      const mediaId = await uploadMedia(auth, "video/mp4");
 
       const res = await compose(auth, {
         text: "hi",
-        media: { url: "https://example.test/vid.mp4", type: "video" },
+        media: { mediaId },
         platforms: ["facebook", "tiktok"],
       });
 
@@ -312,9 +348,9 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       // Once TikTok's auto-retries are exhausted, the roll-up settles to
       // Partially Published — Facebook's success was never rolled back.
       clock.advance(60_000);
-      await retryDueTargets(db.pool, clock, publisher);
+      await retryDueTargets(db.pool, clock, publisher, mediaDir);
       clock.advance(60_000);
-      await retryDueTargets(db.pool, clock, publisher);
+      await retryDueTargets(db.pool, clock, publisher, mediaDir);
 
       const final = await app.inject({ method: "GET", url: `/api/posts/${postId}`, headers: auth });
       expect(final.json().post.status).toBe("partially_published");
@@ -354,7 +390,7 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       publisher.scriptSuccess("facebook", "fb-recovered");
       clock.advance(60_000);
 
-      const outcome = await retryDueTargets(db.pool, clock, publisher);
+      const outcome = await retryDueTargets(db.pool, clock, publisher, mediaDir);
       expect(outcome).toMatchObject({ attempted: 1, published: 1, failed: 0 });
 
       const res = await app.inject({ method: "GET", url: `/api/posts/${postId}`, headers: auth });
@@ -371,7 +407,7 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       const postId = composeRes.json().post.id as string;
 
       clock.advance(60_000);
-      expect(await retryDueTargets(db.pool, clock, publisher)).toMatchObject({
+      expect(await retryDueTargets(db.pool, clock, publisher, mediaDir)).toMatchObject({
         attempted: 1,
         failed: 0,
       });
@@ -379,7 +415,7 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       expect(target).toMatchObject({ status: "pending", retryCount: 2 });
 
       clock.advance(60_000);
-      expect(await retryDueTargets(db.pool, clock, publisher)).toMatchObject({
+      expect(await retryDueTargets(db.pool, clock, publisher, mediaDir)).toMatchObject({
         attempted: 1,
         failed: 1,
       });
@@ -407,9 +443,9 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       const postId = composeRes.json().post.id as string;
 
       clock.advance(60_000);
-      await retryDueTargets(db.pool, clock, publisher);
+      await retryDueTargets(db.pool, clock, publisher, mediaDir);
       clock.advance(60_000);
-      await retryDueTargets(db.pool, clock, publisher);
+      await retryDueTargets(db.pool, clock, publisher, mediaDir);
 
       publisher.scriptSuccess("facebook", "fb-manual-recovery");
       const res = await app.inject({

@@ -15,6 +15,7 @@ import { registerBrandingRoutes } from "./routes/branding.js";
 import { registerConnectionRoutes } from "./routes/connections.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerPostRoutes } from "./routes/posts.js";
+import { registerMediaRoutes } from "./routes/media.js";
 
 /**
  * Everything the HTTP app depends on, injected at construction. This is what
@@ -58,6 +59,13 @@ export interface AppDeps {
   metaAppSecret?: string;
   /** The health queue. Optional so pure-HTTP tests can omit Redis entirely. */
   healthQueue?: Queue<HealthJobData>;
+  /**
+   * Directory on this server's disk where uploaded Media files live (Slice 9;
+   * ADR 0003 — no object store).
+   */
+  mediaDir: string;
+  /** This API's own public HTTPS origin, used to build a Media's fetch URL. */
+  mediaBaseUrl: string;
 }
 
 declare module "fastify" {
@@ -67,12 +75,23 @@ declare module "fastify" {
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
-  const app = Fastify({ logger: false });
+  // Raised from Fastify's 1MB default to leave room for an uploaded image/video
+  // (Slice 9) — small enough to keep a single misbehaving upload from starving
+  // the process, since Media is served straight off this server's own disk.
+  const app = Fastify({ logger: false, bodyLimit: 25 * 1024 * 1024 });
   app.decorate("deps", deps);
 
   app.register(cors, { origin: true });
   // Meta posts its callbacks form-encoded, not as JSON.
   app.register(formbody);
+  // Media uploads (Slice 9) arrive as a raw body under whatever Content-Type
+  // the caller sends — including one we reject (e.g. `audio/*`), which the
+  // upload route needs to see and answer with its own 400, not Fastify's
+  // generic 415. Catch-all: only applies where no more specific parser (JSON,
+  // form-encoded) is already registered, so those are unaffected.
+  app.addContentTypeParser("*", { parseAs: "buffer" }, (_request, body, done) => {
+    done(null, body);
+  });
 
   // The tenancy spine (Slice 2): Superadmin provisioning on the `admin.` surface
   // and Client-scoped User login on each Client subdomain.
@@ -90,6 +109,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Compose + validate-and-gate + immediate publish (Slice 8): a Post fans out
   // to one Target per selected platform through the same Publisher seam.
   app.register(registerPostRoutes);
+  // Media upload + public serve (Slice 9; ADR 0003): stored on this server's
+  // own disk, ephemeral, purged once a Post's Targets have all settled.
+  app.register(registerMediaRoutes);
 
   app.get("/api/health", async () => {
     const { pool, clock } = app.deps;

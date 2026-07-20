@@ -50,6 +50,8 @@ async function main(): Promise<void> {
     oauthRedirectBaseUrl: config.oauthRedirectBaseUrl,
     metaAppSecret: config.meta.appSecret,
     healthQueue,
+    mediaDir: config.mediaDir,
+    mediaBaseUrl: config.mediaBaseUrl,
   });
 
   await app.listen({ port: config.apiPort, host: "0.0.0.0" });

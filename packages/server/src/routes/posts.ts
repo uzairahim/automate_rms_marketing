@@ -1,11 +1,20 @@
 import type { FastifyInstance } from "fastify";
+import type pg from "pg";
 import { authenticateClientRequest } from "../auth/guards.js";
 import { isPlatform, planEnables } from "../tenancy/plan.js";
 import type { Platform } from "../core/publisher.js";
 import { findAccount } from "../connections/accounts.js";
 import { validateContent, type ComposedMedia } from "../posts/validation.js";
-import { createPost, findPost, listTargets, type Post, type Target } from "../posts/posts.js";
+import {
+  attachMedia,
+  createPost,
+  findPost,
+  listTargets,
+  type Post,
+  type Target,
+} from "../posts/posts.js";
 import { publishPost, manualRetryTarget } from "../posts/publish.js";
+import { findMedia, mediaPublicUrl } from "../media/media.js";
 
 /**
  * Composing and publishing a Post (PRD stories 29–34, 39–43; Slice 8).
@@ -17,18 +26,32 @@ import { publishPost, manualRetryTarget } from "../posts/publish.js";
 
 interface ComposeBody {
   text?: unknown;
-  media?: { url?: unknown; type?: unknown };
+  media?: { mediaId?: unknown };
   platforms?: unknown;
 }
 
-/** What the compose body names as media, or an error if it is malformed. */
-function parseMedia(body: ComposeBody): { media: ComposedMedia | null } | { error: string } {
-  if (body.media === undefined) return { media: null };
-  const { url, type } = body.media;
-  if (typeof url !== "string" || !url || (type !== "image" && type !== "video")) {
-    return { error: "media must have a url and a type of \"image\" or \"video\"." };
+/**
+ * Resolve the compose body's `media.mediaId` against an uploaded Media
+ * (Slice 9): it must exist, belong to this Client, and still be `active` — a
+ * purged or unknown id is rejected rather than composing a Post pointed at a
+ * dead URL.
+ */
+async function resolveMedia(
+  pool: pg.Pool,
+  mediaBaseUrl: string,
+  clientId: string,
+  body: ComposeBody,
+): Promise<{ media: ComposedMedia | null; mediaId: string | null } | { error: string }> {
+  if (body.media === undefined) return { media: null, mediaId: null };
+  const mediaId = body.media.mediaId;
+  if (typeof mediaId !== "string" || !mediaId) {
+    return { error: "media must reference an uploaded mediaId." };
   }
-  return { media: { url, type } };
+  const row = await findMedia(pool, clientId, mediaId);
+  if (!row || row.status !== "active") {
+    return { error: "Upload media before composing with it." };
+  }
+  return { media: { url: mediaPublicUrl(mediaBaseUrl, row.id), type: row.type }, mediaId: row.id };
 }
 
 export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
@@ -40,8 +63,9 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
 
     const body = request.body ?? {};
     const text = typeof body.text === "string" ? body.text : "";
+    const { pool, clock, publisher, mediaDir, mediaBaseUrl } = app.deps;
 
-    const parsedMedia = parseMedia(body);
+    const parsedMedia = await resolveMedia(pool, mediaBaseUrl, ctx.client.id, body);
     if ("error" in parsedMedia) {
       return reply.code(400).send({ error: "invalid_media", message: parsedMedia.error });
     }
@@ -74,7 +98,6 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
 
     // A Target needs a live destination to publish to — selecting a platform
     // with nothing connected has nowhere to fan out to.
-    const { pool, clock, publisher } = app.deps;
     for (const platform of platforms) {
       const account = await findAccount(pool, ctx.client.id, platform);
       if (account?.status !== "connected") {
@@ -101,9 +124,10 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
       authorId: ctx.user.id,
       text,
       media: parsedMedia.media,
+      mediaId: parsedMedia.mediaId,
       platforms,
     });
-    const publishedTargets = await publishPost(pool, clock, publisher, post, targets);
+    const publishedTargets = await publishPost(pool, clock, publisher, mediaDir, post, targets);
     const final = await findPost(pool, ctx.client.id, post.id);
 
     return reply
@@ -139,14 +163,20 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: "unknown_platform" });
       }
 
-      const { pool, clock, publisher } = app.deps;
+      const { pool, clock, publisher, mediaDir } = app.deps;
       const post = await findPost(pool, ctx.client.id, request.params.id);
       if (!post) {
         return reply.code(404).send({ error: "post_not_found" });
       }
 
-      const result = await manualRetryTarget(pool, clock, publisher, post, platform);
-      if (!result) {
+      const result = await manualRetryTarget(pool, clock, publisher, mediaDir, post, platform);
+      if (!result.ok) {
+        if (result.reason === "media_purged") {
+          return reply.code(409).send({
+            error: "media_purged",
+            message: "The attached media was purged after 24 hours; re-upload it before retrying.",
+          });
+        }
         return reply.code(409).send({
           error: "target_not_failed",
           message: "Only a failed Target can be retried.",
@@ -157,6 +187,49 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
       return reply
         .code(200)
         .send({ post: postView(final ?? post), targets: result.targets.map(targetView) });
+    },
+  );
+
+  // Re-upload after a purge (Slice 9; ADR 0003): attaches a freshly uploaded
+  // Media to a Post that still has a failed Target, so a manual retry can
+  // proceed. Only meaningful once there is something to retry.
+  app.post<{ Params: { id: string }; Body: { mediaId?: unknown } }>(
+    "/api/posts/:id/media",
+    async (request, reply) => {
+      const ctx = await authenticateClientRequest(request, reply);
+      if (!ctx) return reply;
+
+      const { pool, clock, mediaBaseUrl } = app.deps;
+      const post = await findPost(pool, ctx.client.id, request.params.id);
+      if (!post) {
+        return reply.code(404).send({ error: "post_not_found" });
+      }
+
+      const targets = await listTargets(pool, post.id);
+      if (!targets.some((target) => target.status === "failed")) {
+        return reply.code(409).send({
+          error: "nothing_to_retry",
+          message: "This Post has no failed Target to retry.",
+        });
+      }
+
+      const mediaId = request.body?.mediaId;
+      if (typeof mediaId !== "string" || !mediaId) {
+        return reply.code(400).send({ error: "invalid_media", message: "mediaId is required." });
+      }
+      const media = await findMedia(pool, ctx.client.id, mediaId);
+      if (!media || media.status !== "active") {
+        return reply.code(400).send({
+          error: "invalid_media",
+          message: "Upload media before attaching it.",
+        });
+      }
+
+      const updated = await attachMedia(pool, clock, post.id, {
+        mediaId: media.id,
+        media: { url: mediaPublicUrl(mediaBaseUrl, media.id), type: media.type },
+      });
+      return reply.code(200).send({ post: postView(updated) });
     },
   );
 }

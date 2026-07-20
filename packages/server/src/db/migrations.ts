@@ -293,4 +293,46 @@ export const migrations: readonly Migration[] = [
         WHERE status = 'pending' AND next_retry_at IS NOT NULL;
     `,
   },
+  {
+    // Slice 9 — Media lifecycle (ADR 0003). Uploaded image/video lives on this
+    // server's disk only as long as publishing needs it, served over HTTPS so
+    // Meta/TikTok can fetch it by public URL. `status`/`purge_at` carry the
+    // retention rule: 'active' with a null `purge_at` until every Target
+    // settles, then either purged immediately (all Published) or scheduled 24h
+    // out (a partial/total failure, so the User can manually retry first).
+    //
+    // `posts.media_id` links a Post to the Media it was composed with — kept
+    // alongside the existing `media_url`/`media_type` snapshot (unchanged, still
+    // what a Target is told to publish) so the purge job can find "which Media
+    // does this Post's Target set gate" without parsing the snapshot URL.
+    name: "008_media",
+    sql: /* sql */ `
+      CREATE TABLE media (
+        id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        client_id     uuid NOT NULL REFERENCES clients (id) ON DELETE CASCADE,
+        type          text NOT NULL CHECK (type IN ('image', 'video')),
+        -- Filename on disk under the server's configured media directory.
+        storage_key   text NOT NULL,
+        content_type  text NOT NULL,
+        byte_size     bigint NOT NULL,
+        status        text NOT NULL DEFAULT 'active'
+          CONSTRAINT media_status_check CHECK (status IN ('active', 'purged')),
+        -- When this Media is due to be purged. Null while unattached or still
+        -- awaiting a terminal Target outcome; set only once every Target of the
+        -- attached Post is terminal — never on first success (ADR 0003).
+        purge_at      timestamptz,
+        created_at    timestamptz NOT NULL DEFAULT now(),
+        updated_at    timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE INDEX media_client_id ON media (client_id);
+      -- The purge job's due-query, mirroring targets_next_retry_at's approach.
+      CREATE INDEX media_purge_at
+        ON media (purge_at)
+        WHERE status = 'active' AND purge_at IS NOT NULL;
+
+      ALTER TABLE posts
+        ADD COLUMN media_id uuid REFERENCES media (id) ON DELETE SET NULL;
+      CREATE INDEX posts_media_id ON posts (media_id) WHERE media_id IS NOT NULL;
+    `,
+  },
 ];

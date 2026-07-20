@@ -15,12 +15,13 @@ export function startPostRetryWorker(deps: {
   pool: pg.Pool;
   clock: Clock;
   publisher: Publisher;
+  mediaDir: string;
   connection: RedisOptions;
 }): Worker<PostRetryJobData> {
   return new Worker<PostRetryJobData>(
     POST_RETRY_QUEUE_NAME,
     async () => {
-      const outcome = await retryDueTargets(deps.pool, deps.clock, deps.publisher);
+      const outcome = await retryDueTargets(deps.pool, deps.clock, deps.publisher, deps.mediaDir);
       if (outcome.attempted) {
         console.log(
           `[post-retry] attempted ${outcome.attempted} targets ` +

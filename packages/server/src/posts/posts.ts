@@ -44,6 +44,8 @@ export interface Post {
   authorId: string;
   text: string;
   media: ComposedMedia | null;
+  /** The attached Media's id (Slice 9), if any — what the purge job keys off. */
+  mediaId: string | null;
   status: PostStatus;
   createdAt: string;
   updatedAt: string;
@@ -69,6 +71,7 @@ interface PostRow {
   text: string;
   media_url: string | null;
   media_type: string | null;
+  media_id: string | null;
   status: string;
   created_at: Date;
   updated_at: Date;
@@ -87,7 +90,7 @@ interface TargetRow {
   updated_at: Date;
 }
 
-const POST_COLUMNS = `id, client_id, author_id, text, media_url, media_type, status, created_at, updated_at`;
+const POST_COLUMNS = `id, client_id, author_id, text, media_url, media_type, media_id, status, created_at, updated_at`;
 const TARGET_COLUMNS = `id, post_id, platform, status, external_id, permalink, error, retry_count, next_retry_at, updated_at`;
 
 function postFromRow(row: PostRow): Post {
@@ -100,6 +103,7 @@ function postFromRow(row: PostRow): Post {
       row.media_url && row.media_type
         ? { url: row.media_url, type: row.media_type as "image" | "video" }
         : null,
+    mediaId: row.media_id,
     status: row.status as PostStatus,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -130,13 +134,14 @@ export async function createPost(
     authorId: string;
     text: string;
     media: ComposedMedia | null;
+    mediaId: string | null;
     platforms: readonly Platform[];
   },
 ): Promise<{ post: Post; targets: Target[] }> {
   const now = clock.now().toISOString();
   const { rows } = await pool.query<PostRow>(
-    `INSERT INTO posts (client_id, author_id, text, media_url, media_type, status, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, 'publishing', $6, $6)
+    `INSERT INTO posts (client_id, author_id, text, media_url, media_type, media_id, status, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 'publishing', $7, $7)
      RETURNING ${POST_COLUMNS}`,
     [
       input.clientId,
@@ -144,6 +149,7 @@ export async function createPost(
       input.text,
       input.media?.url ?? null,
       input.media?.type ?? null,
+      input.mediaId,
       now,
     ],
   );
@@ -256,6 +262,27 @@ export function rollupStatus(targetStatuses: readonly TargetStatus[]): PostStatu
   if (publishedCount === targetStatuses.length) return "published";
   if (publishedCount === 0) return "failed";
   return "partially_published";
+}
+
+/**
+ * Re-upload after purge (ADR 0003): attach a freshly uploaded Media to a Post
+ * so a manual retry can proceed. Replaces whatever Media the Post previously
+ * pointed to — the purge job keys off `media_id`, so once this returns, the
+ * old (purged) Media is no longer this Post's concern.
+ */
+export async function attachMedia(
+  pool: pg.Pool,
+  clock: Clock,
+  postId: string,
+  input: { mediaId: string; media: ComposedMedia },
+): Promise<Post> {
+  const { rows } = await pool.query<PostRow>(
+    `UPDATE posts SET media_id = $2, media_url = $3, media_type = $4, updated_at = $5
+     WHERE id = $1
+     RETURNING ${POST_COLUMNS}`,
+    [postId, input.mediaId, input.media.url, input.media.type, clock.now().toISOString()],
+  );
+  return postFromRow(rows[0]!);
 }
 
 /** Persist a Post's roll-up status, recomputed from its current Targets. */
