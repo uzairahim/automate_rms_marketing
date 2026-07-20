@@ -47,6 +47,8 @@ export interface Post {
   /** The attached Media's id (Slice 9), if any — what the purge job keys off. */
   mediaId: string | null;
   status: PostStatus;
+  /** UTC. Set only while `scheduled`; rendered in the Client's timezone by the caller. */
+  scheduledAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -73,6 +75,7 @@ interface PostRow {
   media_type: string | null;
   media_id: string | null;
   status: string;
+  scheduled_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -90,7 +93,7 @@ interface TargetRow {
   updated_at: Date;
 }
 
-const POST_COLUMNS = `id, client_id, author_id, text, media_url, media_type, media_id, status, created_at, updated_at`;
+const POST_COLUMNS = `id, client_id, author_id, text, media_url, media_type, media_id, status, scheduled_at, created_at, updated_at`;
 const TARGET_COLUMNS = `id, post_id, platform, status, external_id, permalink, error, retry_count, next_retry_at, updated_at`;
 
 function postFromRow(row: PostRow): Post {
@@ -105,6 +108,7 @@ function postFromRow(row: PostRow): Post {
         : null,
     mediaId: row.media_id,
     status: row.status as PostStatus,
+    scheduledAt: row.scheduled_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -125,7 +129,16 @@ function targetFromRow(row: TargetRow): Target {
   };
 }
 
-/** Create a Post and its Targets — one per selected platform, all `pending`. */
+/**
+ * Create a Post and its Targets — one per selected platform, all `pending`.
+ *
+ * `status` decides what happens next, not this function: `publishing` is fanned
+ * out immediately by the caller, `scheduled` waits for the scheduler's due-query
+ * to find it, and `draft` waits for a User to finish and either schedule or
+ * publish it. A Scheduled/Draft Post's Targets still exist from the moment of
+ * creation — they carry the platform selection — but are never attempted until
+ * the Post leaves that state.
+ */
 export async function createPost(
   pool: pg.Pool,
   clock: Clock,
@@ -136,12 +149,14 @@ export async function createPost(
     media: ComposedMedia | null;
     mediaId: string | null;
     platforms: readonly Platform[];
+    status: PostStatus;
+    scheduledAt: Date | null;
   },
 ): Promise<{ post: Post; targets: Target[] }> {
   const now = clock.now().toISOString();
   const { rows } = await pool.query<PostRow>(
-    `INSERT INTO posts (client_id, author_id, text, media_url, media_type, media_id, status, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 'publishing', $7, $7)
+    `INSERT INTO posts (client_id, author_id, text, media_url, media_type, media_id, status, scheduled_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
      RETURNING ${POST_COLUMNS}`,
     [
       input.clientId,
@@ -150,6 +165,8 @@ export async function createPost(
       input.media?.url ?? null,
       input.media?.type ?? null,
       input.mediaId,
+      input.status,
+      input.scheduledAt?.toISOString() ?? null,
       now,
     ],
   );
@@ -214,6 +231,17 @@ export async function findDueTargets(pool: pg.Pool, asOf: Date): Promise<Target[
     [asOf.toISOString()],
   );
   return rows.map(targetFromRow);
+}
+
+/** Scheduled Posts whose fire time has arrived — the scheduler's due-query. */
+export async function findDuePosts(pool: pg.Pool, asOf: Date): Promise<Post[]> {
+  const { rows } = await pool.query<PostRow>(
+    `SELECT ${POST_COLUMNS} FROM posts
+     WHERE status = 'scheduled' AND scheduled_at <= $1
+     ORDER BY scheduled_at ASC`,
+    [asOf.toISOString()],
+  );
+  return rows.map(postFromRow);
 }
 
 /** Persist the outcome of one publish attempt against a Target. */
@@ -285,16 +313,87 @@ export async function attachMedia(
   return postFromRow(rows[0]!);
 }
 
-/** Persist a Post's roll-up status, recomputed from its current Targets. */
+/**
+ * Persist a Post's roll-up status, recomputed from its current Targets.
+ *
+ * Always called with a status {@link rollupStatus} derives from Target
+ * outcomes (`publishing`/`published`/`partially_published`/`failed`) — never
+ * `draft`/`scheduled` — so `scheduled_at` is unconditionally cleared here too:
+ * once a Post has left `scheduled` for good, its schedule is no longer live
+ * (`Post.scheduledAt` is documented as "set only while scheduled").
+ */
 export async function updatePostStatus(
   pool: pg.Pool,
   clock: Clock,
   postId: string,
   status: PostStatus,
 ): Promise<void> {
-  await pool.query(`UPDATE posts SET status = $2, updated_at = $3 WHERE id = $1`, [
-    postId,
-    status,
-    clock.now().toISOString(),
-  ]);
+  await pool.query(
+    `UPDATE posts SET status = $2, scheduled_at = NULL, updated_at = $3 WHERE id = $1`,
+    [postId, status, clock.now().toISOString()],
+  );
+}
+
+/**
+ * Overwrite a Draft or Scheduled Post's content wholesale (Slice 10) — editing
+ * before it fires (PRD stories 36–38). The caller (the route) is the only place
+ * that enforces the Post is still `draft`/`scheduled`; this is a plain write.
+ */
+export async function updatePostContent(
+  pool: pg.Pool,
+  clock: Clock,
+  postId: string,
+  input: {
+    text: string;
+    media: ComposedMedia | null;
+    mediaId: string | null;
+    status: PostStatus;
+    scheduledAt: Date | null;
+  },
+): Promise<Post> {
+  const { rows } = await pool.query<PostRow>(
+    `UPDATE posts SET
+       text         = $2,
+       media_url    = $3,
+       media_type   = $4,
+       media_id     = $5,
+       status       = $6,
+       scheduled_at = $7,
+       updated_at   = $8
+     WHERE id = $1
+     RETURNING ${POST_COLUMNS}`,
+    [
+      postId,
+      input.text,
+      input.media?.url ?? null,
+      input.media?.type ?? null,
+      input.mediaId,
+      input.status,
+      input.scheduledAt?.toISOString() ?? null,
+      clock.now().toISOString(),
+    ],
+  );
+  return postFromRow(rows[0]!);
+}
+
+/**
+ * Replace a Post's platform selection wholesale. Only meaningful before any
+ * Target has been attempted (a Draft or Scheduled Post's edit) — a plain
+ * delete-and-recreate is safe there because nothing has a publish outcome yet
+ * worth preserving.
+ */
+export async function replaceTargets(
+  pool: pg.Pool,
+  clock: Clock,
+  postId: string,
+  platforms: readonly Platform[],
+): Promise<void> {
+  const now = clock.now().toISOString();
+  await pool.query(`DELETE FROM targets WHERE post_id = $1`, [postId]);
+  for (const platform of platforms) {
+    await pool.query(
+      `INSERT INTO targets (post_id, platform, status, updated_at) VALUES ($1, $2, 'pending', $3)`,
+      [postId, platform, now],
+    );
+  }
 }

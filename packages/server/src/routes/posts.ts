@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
 import { authenticateClientRequest } from "../auth/guards.js";
-import { isPlatform, planEnables } from "../tenancy/plan.js";
+import { isPlatform, planEnables, type Plan } from "../tenancy/plan.js";
+import type { Clock } from "../core/clock.js";
 import type { Platform } from "../core/publisher.js";
 import { findAccount } from "../connections/accounts.js";
 import { validateContent, type ComposedMedia } from "../posts/validation.js";
@@ -10,24 +11,32 @@ import {
   createPost,
   findPost,
   listTargets,
+  replaceTargets,
+  updatePostContent,
   type Post,
+  type PostStatus,
   type Target,
 } from "../posts/posts.js";
 import { publishPost, manualRetryTarget } from "../posts/publish.js";
 import { findMedia, mediaPublicUrl } from "../media/media.js";
 
 /**
- * Composing and publishing a Post (PRD stories 29–34, 39–43; Slice 8).
+ * Composing, scheduling, and publishing a Post (PRD stories 29–45; Slices 8, 10).
  *
- * Scheduling and drafts arrive in Slice 10 — today a Post either fails
- * validate-and-gate and is never created, or is created and published
- * immediately, fanning out to one Target per selected platform.
+ * A compose body resolves to exactly one of three outcomes: `draft` (saved
+ * as-is, ungated — a User may leave it incomplete), `scheduled` (gated exactly
+ * like an immediate publish, but fanned out later by the scheduler's minute
+ * tick), or `publishing` (gated and fanned out to every Target right now).
+ * {@link resolveCompose} is the single place that decides which, shared by both
+ * creating a Post and editing a Draft/Scheduled one before it fires.
  */
 
 interface ComposeBody {
   text?: unknown;
   media?: { mediaId?: unknown };
   platforms?: unknown;
+  scheduledAt?: unknown;
+  draft?: unknown;
 }
 
 /**
@@ -54,85 +63,273 @@ async function resolveMedia(
   return { media: { url: mediaPublicUrl(mediaBaseUrl, row.id), type: row.type }, mediaId: row.id };
 }
 
+type ComposeResolution =
+  | {
+      ok: true;
+      text: string;
+      media: ComposedMedia | null;
+      mediaId: string | null;
+      platforms: Platform[];
+      status: PostStatus;
+      scheduledAt: Date | null;
+    }
+  | { ok: false; code: number; body: Record<string, unknown> };
+
+/**
+ * Resolve a compose/edit body into what a Post should become: parses and
+ * validates content and platform selection, decides `draft` / `scheduled` /
+ * `publishing`, and — for anything other than a Draft — applies the same
+ * Plan-gating, connected-platform, and validate-and-gate checks an immediate
+ * publish always has (PRD story 32: scheduling is blocked exactly like
+ * publishing on invalid content). A Draft is deliberately left ungated so a
+ * User can save incomplete work and finish it later.
+ */
+async function resolveCompose(
+  pool: pg.Pool,
+  clock: Clock,
+  mediaBaseUrl: string,
+  clientId: string,
+  plan: Plan,
+  body: ComposeBody,
+): Promise<ComposeResolution> {
+  const text = typeof body.text === "string" ? body.text : "";
+
+  const parsedMedia = await resolveMedia(pool, mediaBaseUrl, clientId, body);
+  if ("error" in parsedMedia) {
+    return { ok: false, code: 400, body: { error: "invalid_media", message: parsedMedia.error } };
+  }
+
+  const rawPlatforms = Array.isArray(body.platforms) ? body.platforms : [];
+  const unknown = rawPlatforms.find((p) => typeof p !== "string" || !isPlatform(p));
+  if (unknown !== undefined) {
+    return {
+      ok: false,
+      code: 400,
+      body: {
+        error: "unknown_platform",
+        message: `${String(unknown)} isn't a platform this app publishes to.`,
+      },
+    };
+  }
+  const platforms = rawPlatforms as Platform[];
+
+  const draft = body.draft === true;
+  let scheduledAt: Date | null = null;
+  if (!draft && body.scheduledAt !== undefined) {
+    if (typeof body.scheduledAt !== "string") {
+      return {
+        ok: false,
+        code: 400,
+        body: { error: "invalid_scheduled_at", message: "scheduledAt must be an ISO timestamp." },
+      };
+    }
+    const parsed = new Date(body.scheduledAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return {
+        ok: false,
+        code: 400,
+        body: { error: "invalid_scheduled_at", message: "scheduledAt must be an ISO timestamp." },
+      };
+    }
+    if (parsed.getTime() <= clock.now().getTime()) {
+      return {
+        ok: false,
+        code: 400,
+        body: { error: "scheduled_time_in_past", message: "scheduledAt must be in the future." },
+      };
+    }
+    scheduledAt = parsed;
+  }
+
+  const status: PostStatus = draft ? "draft" : scheduledAt ? "scheduled" : "publishing";
+
+  // A Draft carries no obligation to be complete — gating only applies once a
+  // User commits to scheduling or publishing (PRD stories 32–33, 36).
+  if (status !== "draft") {
+    if (platforms.length === 0) {
+      return {
+        ok: false,
+        code: 400,
+        body: { error: "no_platforms_selected", message: "Select at least one platform to publish to." },
+      };
+    }
+
+    const notEnabled = platforms.find((platform) => !planEnables(plan, platform));
+    if (notEnabled) {
+      return {
+        ok: false,
+        code: 403,
+        body: {
+          error: "platform_not_enabled",
+          message: `This Client's plan does not include ${notEnabled}.`,
+        },
+      };
+    }
+
+    for (const platform of platforms) {
+      const account = await findAccount(pool, clientId, platform);
+      if (account?.status !== "connected") {
+        return {
+          ok: false,
+          code: 409,
+          body: {
+            error: "platform_not_connected",
+            message: `Connect ${platform} before publishing to it.`,
+          },
+        };
+      }
+    }
+
+    const validation = validateContent({ text, media: parsedMedia.media ?? undefined }, platforms);
+    if (!validation.valid) {
+      return {
+        ok: false,
+        code: 422,
+        body: {
+          error: "invalid_content",
+          message: "This content doesn't satisfy every selected platform's requirements.",
+          reasons: validation.reasons,
+        },
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    text,
+    media: parsedMedia.media,
+    mediaId: parsedMedia.mediaId,
+    platforms,
+    status,
+    scheduledAt,
+  };
+}
+
 export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
-  // Compose and publish immediately (PRD story 34). Scheduling/drafts are a
-  // later slice, so today this is the only way a Post is created.
+  // Compose a Post: saved as a Draft, scheduled for later, or published
+  // immediately (PRD stories 29–36) depending on the body's `draft`/`scheduledAt`.
   app.post<{ Body: ComposeBody }>("/api/posts", async (request, reply) => {
     const ctx = await authenticateClientRequest(request, reply);
     if (!ctx) return reply;
 
-    const body = request.body ?? {};
-    const text = typeof body.text === "string" ? body.text : "";
     const { pool, clock, publisher, mediaDir, mediaBaseUrl } = app.deps;
-
-    const parsedMedia = await resolveMedia(pool, mediaBaseUrl, ctx.client.id, body);
-    if ("error" in parsedMedia) {
-      return reply.code(400).send({ error: "invalid_media", message: parsedMedia.error });
-    }
-
-    const rawPlatforms = Array.isArray(body.platforms) ? body.platforms : [];
-    if (rawPlatforms.length === 0) {
-      return reply.code(400).send({
-        error: "no_platforms_selected",
-        message: "Select at least one platform to publish to.",
-      });
-    }
-    const unknown = rawPlatforms.find((p) => typeof p !== "string" || !isPlatform(p));
-    if (unknown !== undefined) {
-      return reply.code(400).send({
-        error: "unknown_platform",
-        message: `${String(unknown)} isn't a platform this app publishes to.`,
-      });
-    }
-    const platforms = rawPlatforms as Platform[];
-
-    // Plan gating: a Client may only target platforms its Plan enables (PRD
-    // story 27), same gate the connect flow applies.
-    const notEnabled = platforms.find((platform) => !planEnables(ctx.client.plan, platform));
-    if (notEnabled) {
-      return reply.code(403).send({
-        error: "platform_not_enabled",
-        message: `This Client's plan does not include ${notEnabled}.`,
-      });
-    }
-
-    // A Target needs a live destination to publish to — selecting a platform
-    // with nothing connected has nowhere to fan out to.
-    for (const platform of platforms) {
-      const account = await findAccount(pool, ctx.client.id, platform);
-      if (account?.status !== "connected") {
-        return reply.code(409).send({
-          error: "platform_not_connected",
-          message: `Connect ${platform} before publishing to it.`,
-        });
-      }
-    }
-
-    // Validate-and-gate: the content must satisfy every selected platform's
-    // rules before anything is created (PRD stories 32–33).
-    const validation = validateContent({ text, media: parsedMedia.media ?? undefined }, platforms);
-    if (!validation.valid) {
-      return reply.code(422).send({
-        error: "invalid_content",
-        message: "This content doesn't satisfy every selected platform's requirements.",
-        reasons: validation.reasons,
-      });
+    const resolution = await resolveCompose(
+      pool,
+      clock,
+      mediaBaseUrl,
+      ctx.client.id,
+      ctx.client.plan,
+      request.body ?? {},
+    );
+    if (!resolution.ok) {
+      return reply.code(resolution.code).send(resolution.body);
     }
 
     const { post, targets } = await createPost(pool, clock, {
       clientId: ctx.client.id,
       authorId: ctx.user.id,
-      text,
-      media: parsedMedia.media,
-      mediaId: parsedMedia.mediaId,
-      platforms,
+      text: resolution.text,
+      media: resolution.media,
+      mediaId: resolution.mediaId,
+      platforms: resolution.platforms,
+      status: resolution.status,
+      scheduledAt: resolution.scheduledAt,
     });
-    const publishedTargets = await publishPost(pool, clock, publisher, mediaDir, post, targets);
+
+    // Only an immediate publish fans out right now — a Draft/Scheduled Post's
+    // Targets stay `pending` until a User finishes it or the scheduler's tick
+    // finds it due (PRD stories 35–36).
+    const finalTargets =
+      resolution.status === "publishing"
+        ? await publishPost(pool, clock, publisher, mediaDir, post, targets)
+        : targets;
     const final = await findPost(pool, ctx.client.id, post.id);
 
     return reply
       .code(201)
-      .send({ post: postView(final ?? post), targets: publishedTargets.map(targetView) });
+      .send({ post: postView(final ?? post), targets: finalTargets.map(targetView) });
+  });
+
+  // Edit a Draft or Scheduled Post before it fires (PRD stories 36–38): a full
+  // replacement of its content, platform selection, and schedule, gated exactly
+  // like compose unless the edit is itself saved back as a Draft.
+  app.patch<{ Params: { id: string }; Body: ComposeBody }>(
+    "/api/posts/:id",
+    async (request, reply) => {
+      const ctx = await authenticateClientRequest(request, reply);
+      if (!ctx) return reply;
+
+      const { pool, clock, mediaBaseUrl } = app.deps;
+      const post = await findPost(pool, ctx.client.id, request.params.id);
+      if (!post) {
+        return reply.code(404).send({ error: "post_not_found" });
+      }
+      if (post.status !== "draft" && post.status !== "scheduled") {
+        return reply.code(409).send({
+          error: "not_editable",
+          message: "Only a Draft or Scheduled Post can be edited before it fires.",
+        });
+      }
+
+      const resolution = await resolveCompose(
+        pool,
+        clock,
+        mediaBaseUrl,
+        ctx.client.id,
+        ctx.client.plan,
+        request.body ?? {},
+      );
+      if (!resolution.ok) {
+        return reply.code(resolution.code).send(resolution.body);
+      }
+      if (resolution.status === "publishing") {
+        return reply.code(400).send({
+          error: "missing_schedule",
+          message: "Provide scheduledAt to keep this Post scheduled, or draft: true to save it as a Draft.",
+        });
+      }
+
+      const updated = await updatePostContent(pool, clock, post.id, {
+        text: resolution.text,
+        media: resolution.media,
+        mediaId: resolution.mediaId,
+        status: resolution.status,
+        scheduledAt: resolution.scheduledAt,
+      });
+      await replaceTargets(pool, clock, post.id, resolution.platforms);
+      const targets = await listTargets(pool, post.id);
+
+      return reply.code(200).send({ post: postView(updated), targets: targets.map(targetView) });
+    },
+  );
+
+  // Cancel a Scheduled Post before it fires (PRD story 38): it never publishes,
+  // and is left as a Draft — the same content, just no longer due at a fixed
+  // time — rather than a dead end the User must recompose from scratch.
+  app.post<{ Params: { id: string } }>("/api/posts/:id/cancel", async (request, reply) => {
+    const ctx = await authenticateClientRequest(request, reply);
+    if (!ctx) return reply;
+
+    const { pool, clock } = app.deps;
+    const post = await findPost(pool, ctx.client.id, request.params.id);
+    if (!post) {
+      return reply.code(404).send({ error: "post_not_found" });
+    }
+    if (post.status !== "scheduled") {
+      return reply.code(409).send({
+        error: "not_scheduled",
+        message: "Only a Scheduled Post can be cancelled.",
+      });
+    }
+
+    const updated = await updatePostContent(pool, clock, post.id, {
+      text: post.text,
+      media: post.media,
+      mediaId: post.mediaId,
+      status: "draft",
+      scheduledAt: null,
+    });
+    return reply.code(200).send({ post: postView(updated) });
   });
 
   // A Post's current state — used to watch a Publishing Post settle, and to
@@ -240,6 +437,7 @@ function postView(post: Post) {
     text: post.text,
     media: post.media,
     status: post.status,
+    scheduledAt: post.scheduledAt,
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
   };

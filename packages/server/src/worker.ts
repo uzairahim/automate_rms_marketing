@@ -13,11 +13,14 @@ import { schedulePostRetry } from "./queue/post-retry-queue.js";
 import { startPostRetryWorker } from "./worker/post-retry-worker.js";
 import { scheduleMediaPurge } from "./queue/media-purge-queue.js";
 import { startMediaPurgeWorker } from "./worker/media-purge-worker.js";
+import { schedulePostScheduler } from "./queue/post-scheduler-queue.js";
+import { startPostSchedulerWorker } from "./worker/post-scheduler-worker.js";
 
 /**
  * Worker process entrypoint. It runs the recurring jobs the PRD calls for: the
- * token-refresh job arrives with the connect flow (Slice 6), and the minute
- * scheduler and daily metric snapshot follow in later slices.
+ * token-refresh job arrives with the connect flow (Slice 6), the minute
+ * scheduler with Slice 10, and the daily metric snapshot follows in a later
+ * slice.
  */
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -57,6 +60,17 @@ async function main(): Promise<void> {
   const mediaPurgeQueue = await scheduleMediaPurge(connection);
   const mediaPurgeWorker = startMediaPurgeWorker({ pool, clock, mediaDir: config.mediaDir, connection });
 
+  // Fires due Scheduled Posts on a minute tick, marking a badly-late one
+  // Failed instead (Slice 10; PRD stories 35, 44–45).
+  const postSchedulerQueue = await schedulePostScheduler(connection);
+  const postSchedulerWorker = startPostSchedulerWorker({
+    pool,
+    clock,
+    publisher,
+    mediaDir: config.mediaDir,
+    connection,
+  });
+
   healthWorker.on("ready", () => console.log("Health worker ready"));
   healthWorker.on("failed", (job, err) =>
     console.error(`Job ${job?.id} failed:`, err),
@@ -73,6 +87,10 @@ async function main(): Promise<void> {
   mediaPurgeWorker.on("failed", (job, err) =>
     console.error(`Media purge job ${job?.id} failed:`, err),
   );
+  postSchedulerWorker.on("ready", () => console.log("Post scheduler worker ready"));
+  postSchedulerWorker.on("failed", (job, err) =>
+    console.error(`Post scheduler job ${job?.id} failed:`, err),
+  );
 
   const shutdown = async () => {
     await healthWorker.close();
@@ -82,6 +100,8 @@ async function main(): Promise<void> {
     await postRetryQueue.close();
     await mediaPurgeWorker.close();
     await mediaPurgeQueue.close();
+    await postSchedulerWorker.close();
+    await postSchedulerQueue.close();
     await pool.end();
     process.exit(0);
   };

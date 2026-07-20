@@ -335,4 +335,28 @@ export const migrations: readonly Migration[] = [
       CREATE INDEX posts_media_id ON posts (media_id) WHERE media_id IS NOT NULL;
     `,
   },
+  {
+    // Slice 10 — scheduling, grace window, and drafts. A Scheduled Post's
+    // Targets are created up front (they carry the platform selection) but are
+    // never attempted until the scheduler's minute tick finds them due; a Draft
+    // has no obligation to be complete or gated at all.
+    name: "009_scheduling",
+    sql: /* sql */ `
+      ALTER TABLE posts
+        -- Always UTC; the Client's timezone (clients.timezone) is applied only
+        -- when rendering, never stored per-Post (CONTEXT.md \`Client\`).
+        ADD COLUMN scheduled_at timestamptz,
+        -- Symmetric: a Post has a schedule if and only if it is \`scheduled\` —
+        -- \`updatePostStatus\` clears it the moment a Post fires or is missed,
+        -- so this holds in both directions, not just "scheduled implies a time".
+        ADD CONSTRAINT posts_scheduled_requires_time
+          CHECK ((status = 'scheduled') = (scheduled_at IS NOT NULL));
+
+      -- The scheduler's due-query, mirroring targets_next_retry_at and
+      -- media_purge_at: a partial index over exactly what "due" ever means.
+      CREATE INDEX posts_due_scheduled
+        ON posts (scheduled_at)
+        WHERE status = 'scheduled' AND scheduled_at IS NOT NULL;
+    `,
+  },
 ];
