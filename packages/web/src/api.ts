@@ -99,5 +99,29 @@ export const selectFacebookPage = (state: string, pageId: string) =>
     body: { state, pageId },
   });
 
-export const disconnectFacebook = () =>
-  apiFetch<{ connection: ConnectedAccount }>("/api/connections/facebook", { method: "DELETE" });
+/**
+ * Connect Instagram. No redirect and no callback screen: an IG Business account
+ * is reached through the already-connected Page, so this one call is the whole
+ * flow (ADR 0005).
+ */
+export const connectInstagram = () =>
+  apiFetch<{ connection: ConnectedAccount }>("/api/connections/instagram/connect", {
+    method: "POST",
+  });
+
+export const startTikTokConnect = () =>
+  apiFetch<{ authorizeUrl: string; state: string }>("/api/connections/tiktok/start", {
+    method: "POST",
+  });
+
+/** Finish TikTok login. One step — TikTok authorizes one account, so it connects. */
+export const completeTikTokLogin = (state: string, code: string) =>
+  apiFetch<{ connection: ConnectedAccount }>("/api/connections/tiktok/callback", {
+    method: "POST",
+    body: { state, code },
+  });
+
+export const disconnectPlatform = (platform: Platform) =>
+  apiFetch<{ connection: ConnectedAccount }>(`/api/connections/${platform}`, {
+    method: "DELETE",
+  });

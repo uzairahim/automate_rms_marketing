@@ -4,17 +4,25 @@ import {
   type AuthorizeRequest,
   type ExchangeRequest,
   type FacebookPage,
+  type InstagramAccount,
   type Platform,
   type PlatformCredential,
   type PublishRequest,
   type PublishResult,
   type Publisher,
   type RefreshRequest,
+  type TikTokAccount,
 } from "../core/publisher.js";
 
 /**
  * The real Meta transport — one implementation of the {@link Publisher} seam
  * (ADR 0002), speaking the Graph API over `fetch`.
+ *
+ * It answers for *both* Facebook and Instagram, because on Meta's side they are
+ * one thing: an IG Business account is a property of a Page, publishes with that
+ * Page's token, and has no login of its own (ADR 0005). Splitting them into two
+ * transports would mean two objects sharing one app, one token, and one
+ * revocation.
  *
  * Nothing in here is exercised by the behavioral suite, by design: the suite
  * runs against the fake, and this is integration-verified against our own test
@@ -22,7 +30,7 @@ import {
  * is why it is kept as thin as it is — the interesting decisions live behind the
  * seam, in code that tests can reach.
  *
- * Publishing arrives with Slice 8; Slice 6 needs the connection lifecycle.
+ * Publishing arrives with Slice 8; Slices 6–7 need the connection lifecycle.
  */
 
 const GRAPH_VERSION = "v21.0";
@@ -43,7 +51,20 @@ const FACEBOOK_SCOPES = [
   "pages_manage_posts",
   "pages_read_engagement",
   "business_management",
+  // Instagram is authorized here too, at the Facebook login (Slice 7): it has no
+  // consent screen of its own, so these are the only chance to ask.
+  "instagram_basic",
+  "instagram_content_publish",
 ];
+
+/**
+ * The `fields` expression that turns `me/accounts` into everything a connection
+ * needs: the Page, the token we publish with, and the IG Business account linked
+ * to it. Asking for `instagram_business_account` here rather than in a second
+ * call per Page is what keeps refresh to two round-trips regardless of how many
+ * Pages a person manages.
+ */
+const PAGE_FIELDS = "id,name,access_token,instagram_business_account{id,username}";
 
 /** Meta's error envelope. */
 interface GraphError {
@@ -59,7 +80,7 @@ export class MetaPublisher implements Publisher {
   ) {}
 
   authorizeUrl(request: AuthorizeRequest): string {
-    this.assertMeta(request.platform);
+    this.assertFacebookLogin(request.platform);
     const params = new URLSearchParams({
       client_id: this.appId,
       redirect_uri: request.redirectUri,
@@ -71,7 +92,7 @@ export class MetaPublisher implements Publisher {
   }
 
   async exchangeCode(request: ExchangeRequest): Promise<PlatformCredential> {
-    this.assertMeta(request.platform);
+    this.assertFacebookLogin(request.platform);
 
     // A short-lived user token first...
     const short = await this.graph<{ access_token: string }>("oauth/access_token", {
@@ -92,13 +113,20 @@ export class MetaPublisher implements Publisher {
     // and only Pages — a personal profile cannot appear here, and an account
     // that manages none returns an empty list, which is a real dead-end.
     const body = await this.graph<{
-      data?: Array<{ id: string; name: string; access_token: string }>;
-    }>("me/accounts", { access_token: credential.accessToken, limit: "100" });
+      data?: Array<{
+        id: string;
+        name: string;
+        access_token: string;
+        instagram_business_account?: { id: string; username: string };
+      }>;
+    }>("me/accounts", {
+      access_token: credential.accessToken,
+      fields: PAGE_FIELDS,
+      limit: "100",
+    });
 
-    return (body.data ?? []).map((page) => ({
-      id: page.id,
-      name: page.name,
-      credential: {
+    return (body.data ?? []).map((page) => {
+      const pageCredential: PlatformCredential = {
         // The Page token, not the user token: publishing acts as the Page.
         accessToken: page.access_token,
         // A Page token derived from a long-lived user token does not carry its
@@ -110,12 +138,44 @@ export class MetaPublisher implements Publisher {
         // Keep the user token: it is the only thing Meta will extend, and the
         // only way to re-derive this Page token later. See `refreshCredential`.
         parentToken: credential.accessToken,
-      },
-    }));
+      };
+      return {
+        id: page.id,
+        name: page.name,
+        credential: pageCredential,
+        instagram: instagramFrom(page.instagram_business_account, pageCredential),
+      };
+    });
+  }
+
+  async listInstagramAccounts(
+    credential: PlatformCredential,
+    pageId: string,
+  ): Promise<InstagramAccount[]> {
+    // Asked of the *Page*, using the Page's own token — which is all we still
+    // hold once a Page is connected, and all a hand-pasted token (ADR 0008)
+    // could ever be. `instagram_business_account` is absent for a Page with no
+    // linked Business/Creator account, and there is no field that would name a
+    // personal one: ADR 0005's enforcement is this shape, not a check of ours.
+    const page = await this.graph<{
+      instagram_business_account?: { id: string; username: string };
+    }>(pageId, {
+      access_token: credential.accessToken,
+      fields: "instagram_business_account{id,username}",
+    });
+
+    const account = instagramFrom(page.instagram_business_account, credential);
+    return account ? [account] : [];
+  }
+
+  async fetchTikTokAccount(): Promise<TikTokAccount> {
+    // TikTok is a different company's API entirely — see TikTokPublisher. The
+    // router never sends one here; guarding says so out loud if it ever did.
+    throw new PublisherError("tiktok", "The Meta transport does not speak to TikTok.");
   }
 
   async refreshCredential(request: RefreshRequest): Promise<PlatformCredential> {
-    this.assertMeta(request.platform);
+    this.assertMetaPlatform(request.platform);
     const { credential, externalId } = request;
 
     // A Page token cannot be extended on its own: `fb_exchange_token` is a
@@ -131,14 +191,26 @@ export class MetaPublisher implements Publisher {
 
     const user = await this.exchangeForLongLived(credential.parentToken);
     const pages = await this.listFacebookPages(user);
-    const page = pages.find((candidate) => candidate.id === externalId);
-    // The person still has a valid login but no longer manages the Page (it was
-    // handed over, or our access to it was removed). That is a genuine
-    // "reconnect" — the caller marks it token_expired.
+
+    // Instagram publishes with a Page token but is *identified* by its own id, so
+    // the refreshed token is found by asking which Page still links to it. That
+    // it can come up empty is the point: an IG account unlinked from the Page, or
+    // a Page handed to someone else, are both genuine "reconnect" — and this is
+    // the only place we'd find out.
+    const page =
+      request.platform === "instagram"
+        ? pages.find((candidate) => candidate.instagram?.id === externalId)
+        : pages.find((candidate) => candidate.id === externalId);
+
+    // The person still has a valid login but no longer manages the destination
+    // (it was handed over, or our access to it was removed). The caller marks it
+    // token_expired.
     if (!page) {
       throw new PublisherError(
         request.platform,
-        "This Facebook account no longer manages the connected Page.",
+        request.platform === "instagram"
+          ? "No Facebook Page this account manages links to the connected Instagram account."
+          : "This Facebook account no longer manages the connected Page.",
       );
     }
     return page.credential;
@@ -215,17 +287,39 @@ export class MetaPublisher implements Publisher {
   }
 
   /**
-   * Instagram publishes through the Graph API too and will share this transport
-   * (Slice 7), but it does not share the *connect* flow — its accounts are
-   * discovered from an already-chosen Page. Guarding here keeps that from being
-   * discovered as a silent wrong answer later.
+   * Instagram shares this transport but not the *login*: there is no Instagram
+   * consent screen and no Instagram authorization code. An IG account is reached
+   * from an already-connected Page (`listInstagramAccounts`), so asking this
+   * transport for an Instagram OAuth URL is a caller bug, not a platform refusal.
    */
-  private assertMeta(platform: Platform): void {
+  private assertFacebookLogin(platform: Platform): void {
     if (platform !== "facebook") {
       throw new PublisherError(
         platform,
-        `The Meta transport's connect flow covers Facebook only; got ${platform}.`,
+        `Only Facebook has a Meta login; ${platform} is connected without one.`,
       );
     }
   }
+
+  /** The platforms this transport speaks for at all. */
+  private assertMetaPlatform(platform: Platform): void {
+    if (platform !== "facebook" && platform !== "instagram") {
+      throw new PublisherError(
+        platform,
+        `The Meta transport covers Facebook and Instagram; got ${platform}.`,
+      );
+    }
+  }
+}
+
+/**
+ * Project a Page's `instagram_business_account` into an {@link InstagramAccount},
+ * or undefined when the Page links to none. The Page's credential comes along
+ * because it is what publishes to the account — Instagram has no token of its own.
+ */
+function instagramFrom(
+  account: { id: string; username: string } | undefined,
+  pageCredential: PlatformCredential,
+): InstagramAccount | undefined {
+  return account && { id: account.id, username: account.username, credential: pageCredential };
 }

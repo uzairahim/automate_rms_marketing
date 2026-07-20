@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { accessDenied, authenticateClientRequest } from "../auth/guards.js";
-import { planEnables } from "../tenancy/plan.js";
+import { isPlatform, planEnables } from "../tenancy/plan.js";
 import { PLATFORMS, PublisherError, type Platform } from "../core/publisher.js";
 import {
   attachCredentialToState,
@@ -13,21 +13,32 @@ import {
   disconnectAccount,
   findAccount,
   listAccounts,
+  openAccountCredential,
   type ConnectedAccount,
 } from "../connections/accounts.js";
 import { findClientById } from "../tenancy/clients.js";
 
 /**
- * Connecting a Client's social destinations (PRD stories 18–20, 25, 28).
+ * Connecting a Client's social destinations (PRD stories 18–28).
  *
- * The Facebook handshake is deliberately two steps with a choice in the middle:
- * logging in tells us which Pages a person manages, and *they* say which one
- * this Client connects. We never auto-pick, and a person who manages no Page is
- * a dead-end rather than a fallback to their personal profile — the Graph API
- * cannot publish to one at all (ADR 0005).
+ * The three platforms connect in three different shapes, because the platforms
+ * are three different shapes — and that asymmetry is the design, not an
+ * inconsistency to smooth over:
  *
- * Everything routes through the {@link Publisher} seam (ADR 0002), so tests
- * drive the whole flow against the fake and no real Meta call is ever made.
+ *   - **Facebook** is two steps with a choice in the middle: logging in tells us
+ *     which Pages a person manages, and *they* say which one this Client
+ *     connects. We never auto-pick, and a person who manages no Page is a
+ *     dead-end rather than a fallback to their personal profile — the Graph API
+ *     cannot publish to one at all (ADR 0005).
+ *   - **Instagram** has no login at all. An IG Business account is a property of
+ *     a Page, so connecting it is one call against the Page already connected —
+ *     the choice was made when the Page was chosen. A Page with no eligible
+ *     account is the second dead-end ADR 0005 describes.
+ *   - **TikTok** is one step: its OAuth authorizes exactly one account, so there
+ *     is nothing to choose and no dead-end to guide out of.
+ *
+ * Everything routes through the {@link Publisher} seam (ADR 0002), so tests drive
+ * every one of these against the fake and no real Meta or TikTok call is made.
  */
 
 /** The redirect URI for a platform. One fixed URI per platform — see AppDeps. */
@@ -84,21 +95,40 @@ export async function registerConnectionRoutes(app: FastifyInstance): Promise<vo
     return reply.code(200).send({ connections: connections.map(connectionView) });
   });
 
-  // Unlink the Facebook Page (PRD story 28). Deliberately *not* Plan-gated: this
-  // is the one action that only ever removes access, so refusing it for a
+  // Unlink a Connected Account (PRD story 28). Deliberately *not* Plan-gated:
+  // this is the one action that only ever removes access, so refusing it for a
   // disabled platform would strand a Client with a connection it cannot undo.
-  app.delete("/api/connections/facebook", async (request, reply) => {
-    const ctx = await authenticateClientRequest(request, reply);
-    if (!ctx) return reply;
+  //
+  // Disconnecting Facebook leaves a connected Instagram alone, even though it was
+  // reached through that Page: the Page token it holds still works, and the User
+  // unlinked a destination, not an authorization. Revoking the *authorization* is
+  // a different act, and Meta tells us about it — see the deauthorization callback.
+  app.delete<{ Params: { platform: string } }>(
+    "/api/connections/:platform",
+    async (request, reply) => {
+      // Authenticate before saying anything about the path, as every other route
+      // here does — an anonymous caller learns nothing, not even which platform
+      // names are real.
+      const ctx = await authenticateClientRequest(request, reply);
+      if (!ctx) return reply;
 
-    const { pool, clock } = app.deps;
-    await disconnectAccount(pool, clock, { clientId: ctx.client.id, platform: "facebook" });
+      const platform = request.params.platform;
+      if (!isPlatform(platform)) {
+        return reply.code(404).send({
+          error: "unknown_platform",
+          message: `${platform} isn't a platform this app publishes to.`,
+        });
+      }
 
-    const account = await findAccount(pool, ctx.client.id, "facebook");
-    return reply
-      .code(200)
-      .send({ connection: connectionView(account ?? notConnected("facebook")) });
-  });
+      const { pool, clock } = app.deps;
+      await disconnectAccount(pool, clock, { clientId: ctx.client.id, platform });
+
+      const account = await findAccount(pool, ctx.client.id, platform);
+      return reply
+        .code(200)
+        .send({ connection: connectionView(account ?? notConnected(platform)) });
+    },
+  );
 
   // Begin Facebook login. The state is minted server-side and bound to this
   // Client and User, so the callback that comes back through the shared redirect
@@ -258,6 +288,173 @@ export async function registerConnectionRoutes(app: FastifyInstance): Promise<vo
         displayName: page.name,
         // The Page token, not the user token: publishing acts as the Page.
         credential: page.credential,
+      });
+      await consumeOAuthState(pool, state);
+
+      return reply.code(200).send({ connection: connectionView(connection) });
+    },
+  );
+
+  // Connect Instagram (PRD stories 21–22). One step and no redirect, because
+  // there is no Instagram login to send anyone to: an IG Business account is a
+  // property of a Facebook Page, so all this does is ask the Page we already
+  // hold a token for what it links to (ADR 0005).
+  app.post("/api/connections/instagram/connect", async (request, reply) => {
+    const ctx = await authorizeForPlatform(request, reply, "instagram");
+    if (!ctx) return reply;
+
+    const { pool, clock, publisher, tokenCipher } = app.deps;
+
+    // No usable Page, no Instagram — there is no other route to an IG account.
+    // The two ways to have no usable Page need different words, because they need
+    // different actions from the User: a Page that is merely expired is still
+    // linked, and telling its owner to "connect a Page" would send them past the
+    // Reconnect button that actually fixes it (PRD story 26).
+    const facebook = await findAccount(pool, ctx.client.id, "facebook");
+    if (facebook?.status === "token_expired") {
+      return reply.code(409).send({
+        error: "facebook_token_expired",
+        message:
+          "Your Facebook Page's access has expired. Reconnect the Page first, then connect " +
+          "Instagram — the Instagram account is reached through it.",
+      });
+    }
+
+    const page = await openAccountCredential(pool, tokenCipher, ctx.client.id, "facebook");
+    if (!page) {
+      return reply.code(409).send({
+        error: "facebook_not_connected",
+        message:
+          "Connect your Facebook Page first — an Instagram Business account is linked to a " +
+          "Page, and is reached through it.",
+      });
+    }
+
+    let accounts;
+    try {
+      accounts = await publisher.listInstagramAccounts(page.credential, page.externalId);
+    } catch (err) {
+      if (err instanceof PublisherError) {
+        return reply.code(502).send({ error: "instagram_error", message: err.message });
+      }
+      throw err;
+    }
+
+    // ADR 0005's second dead-end. The Graph API names a Page's Business/Creator
+    // account and nothing else, so "none returned" means there is no account we
+    // could ever publish to — not that we failed to look properly.
+    const account = accounts[0];
+    if (!account) {
+      return reply.code(409).send({
+        error: "no_instagram_account",
+        message:
+          "This Facebook Page has no Instagram Business or Creator account linked to it. " +
+          "In the Instagram app, switch the account to a Business or Creator account and link " +
+          "it to this Page, then connect again — posting to a personal Instagram account isn't " +
+          "possible.",
+      });
+    }
+
+    const connection = await connectAccount(pool, clock, tokenCipher, {
+      clientId: ctx.client.id,
+      platform: "instagram",
+      externalId: account.id,
+      displayName: account.username,
+      // The Page's token: Instagram has none of its own, and publishing to an IG
+      // Business account is an act of the Page it is linked to.
+      credential: account.credential,
+    });
+
+    return reply.code(200).send({ connection: connectionView(connection) });
+  });
+
+  // Begin TikTok login (PRD story 23). Same state discipline as Facebook: minted
+  // server-side, bound to this Client and User, because TikTok's callback comes
+  // back through one shared redirect URI too.
+  app.post("/api/connections/tiktok/start", async (request, reply) => {
+    const ctx = await authorizeForPlatform(request, reply, "tiktok");
+    if (!ctx) return reply;
+
+    const { pool, clock, publisher, oauthRedirectBaseUrl } = app.deps;
+    const state = await startOAuthState(pool, clock, {
+      clientId: ctx.client.id,
+      userId: ctx.user.id,
+      platform: "tiktok",
+    });
+
+    const authorizeUrl = publisher.authorizeUrl({
+      platform: "tiktok",
+      state,
+      redirectUri: redirectUriFor(oauthRedirectBaseUrl, "tiktok"),
+    });
+
+    return reply.code(200).send({ authorizeUrl, state });
+  });
+
+  // Return from TikTok login, and connect. Unlike Facebook this finishes in one
+  // step: TikTok's OAuth authorizes exactly one account, so there is nothing to
+  // park a credential for and nothing to offer.
+  app.post<{ Body: { state?: string; code?: string } }>(
+    "/api/connections/tiktok/callback",
+    async (request, reply) => {
+      const { state, code } = request.body ?? {};
+      if (typeof state !== "string" || typeof code !== "string") {
+        return reply
+          .code(400)
+          .send({ error: "invalid_body", message: "state and code are required." });
+      }
+
+      const { pool, clock, publisher, tokenCipher, oauthRedirectBaseUrl } = app.deps;
+      const handshake = await findOAuthState(pool, clock, tokenCipher, {
+        state,
+        platform: "tiktok",
+      });
+      if (!handshake) {
+        return reply.code(400).send({
+          error: "invalid_state",
+          message: "This connection attempt has expired. Please start again.",
+        });
+      }
+
+      // The Plan and access status are re-checked against the Client the state
+      // names, not the request's host: a Client suspended or de-toggled during the
+      // handshake must not be able to finish it. Checked before the exchange, so a
+      // Client that may not connect never gets a token minted for it at all.
+      const client = await findClientById(pool, handshake.clientId);
+      if (!client) {
+        return reply.code(404).send({ error: "unknown_client" });
+      }
+      const denied = accessDenied(client.plan.accessStatus);
+      if (denied) return reply.code(403).send(denied);
+      if (!planEnables(client.plan, "tiktok")) {
+        return reply.code(403).send({
+          error: "platform_not_enabled",
+          message: "This Client's plan does not include tiktok.",
+        });
+      }
+
+      let credential;
+      let account;
+      try {
+        credential = await publisher.exchangeCode({
+          platform: "tiktok",
+          code,
+          redirectUri: redirectUriFor(oauthRedirectBaseUrl, "tiktok"),
+        });
+        account = await publisher.fetchTikTokAccount(credential);
+      } catch (err) {
+        if (err instanceof PublisherError) {
+          return reply.code(502).send({ error: "tiktok_error", message: err.message });
+        }
+        throw err;
+      }
+
+      const connection = await connectAccount(pool, clock, tokenCipher, {
+        clientId: handshake.clientId,
+        platform: "tiktok",
+        externalId: account.id,
+        displayName: account.displayName,
+        credential,
       });
       await consumeOAuthState(pool, state);
 

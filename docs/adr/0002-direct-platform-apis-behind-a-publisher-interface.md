@@ -34,3 +34,10 @@ the meantime.
   adopt if a review stalls.
 - We must run background jobs for token refresh and honor per-platform rate
   limits (e.g. Instagram's ~25 posts/24h) ourselves.
+
+## Amendments
+
+- **ADR 0009 refines "one implementation per platform"** to *one implementation
+  per upstream API, routed per platform*: Facebook and Instagram are one Meta
+  transport, because on Meta's side they are one app, one token, and one
+  revocation. The seam and its swappability are unchanged.

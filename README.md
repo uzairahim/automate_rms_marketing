@@ -56,13 +56,23 @@ round-trips.
 
 Run migrations standalone with `npm run migrate`.
 
-### Connecting a Facebook Page without a Meta app
+### Connecting accounts without a Meta or TikTok app
 
 With `META_APP_ID`/`META_APP_SECRET` unset, the app wires the **fake
 `Publisher`** instead of the real Graph API transport, so the whole connect flow
 is clickable end-to-end locally without reaching Facebook (the same shape as the
-console email sender). Set both to build against a real test Page while App
-Review is pending — see [docs/platform-app-setup.md](docs/platform-app-setup.md).
+console email sender). `TIKTOK_CLIENT_KEY`/`TIKTOK_CLIENT_SECRET` do the same for
+TikTok. The choice is **per platform**, because approval is: Meta and TikTok are
+two reviews on two timelines, so a deployment with real Facebook/Instagram and a
+faked TikTok is a supported state, not a broken one. Set the credentials to build
+against a real test Page / the TikTok sandbox while review is pending — see
+[docs/platform-app-setup.md](docs/platform-app-setup.md).
+
+Facebook and Instagram share one Meta app, one login, and one transport, because
+on Meta's side they are one thing: an Instagram Business account is a property of
+a Page and publishes with that Page's token (ADR 0005). So Instagram has no
+"connect with Instagram" button that leaves the app — you connect the Page, then
+connect the account it links to.
 
 `TOKEN_ENCRYPTION_KEY` is **required** (ADR 0006): platform tokens are encrypted
 at rest with a key that lives outside the database. `.env.example` ships a

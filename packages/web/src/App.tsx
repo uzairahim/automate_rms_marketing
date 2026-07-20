@@ -4,6 +4,7 @@ import type { Session } from "./session.js";
 import { LoginScreen } from "./LoginScreen.jsx";
 import { Connections } from "./Connections.jsx";
 import { FacebookCallback } from "./FacebookCallback.jsx";
+import { TikTokCallback } from "./TikTokCallback.jsx";
 
 /**
  * A Client's white-label branding, fetched from the API at load and resolved
@@ -26,8 +27,13 @@ const DEFAULT_BRANDING: Branding = {
   logoUrl: null,
 };
 
-/** The path Facebook returns a User to. See `OAUTH_REDIRECT_BASE_URL`. */
+/**
+ * The paths each platform returns a User to. One per platform, matching the
+ * server's `redirectUriFor` — see `OAUTH_REDIRECT_BASE_URL`. Instagram has none:
+ * it connects in place, without ever leaving the app (ADR 0005).
+ */
 const FACEBOOK_CALLBACK_PATH = "/oauth/facebook/callback";
+const TIKTOK_CALLBACK_PATH = "/oauth/tiktok/callback";
 
 /**
  * Client SPA shell. Applies the Client's white-label branding (logo, primary
@@ -155,6 +161,8 @@ export function App() {
         <LoginScreen onLoggedIn={setSession} />
       ) : path === FACEBOOK_CALLBACK_PATH ? (
         <FacebookCallback onDone={returnToWorkspace} />
+      ) : path === TIKTOK_CALLBACK_PATH ? (
+        <TikTokCallback onDone={returnToWorkspace} />
       ) : (
         <Connections />
       )}

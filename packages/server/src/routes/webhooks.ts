@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { disconnectByPlatformUser } from "../connections/accounts.js";
 import { verifySignedRequest } from "../connections/meta-signed-request.js";
+import { META_PLATFORMS } from "../core/publisher.js";
 
 /**
  * Platform callbacks — requests from Meta rather than from a User.
@@ -38,8 +39,13 @@ export async function registerWebhookRoutes(app: FastifyInstance): Promise<void>
 
       // Keyed by the authorizing person, because that is all Meta tells us: one
       // person may have connected Pages for more than one Client.
+      //
+      // Instagram goes with Facebook, not because Meta says so, but because an
+      // IG Business account publishes with its Page's token (ADR 0005) — the
+      // same token this revocation just voided. Leaving it "connected" would be
+      // claiming access we demonstrably no longer have.
       const disconnected = await disconnectByPlatformUser(app.deps.pool, app.deps.clock, {
-        platform: "facebook",
+        platforms: META_PLATFORMS,
         platformUserId: payload.userId,
       });
 

@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { Clock } from "../core/clock.js";
 import type { SecretCipher } from "../core/crypto.js";
 import type { Platform, PlatformCredential } from "../core/publisher.js";
-import { sealCredential } from "./credentials.js";
+import { openCredential, sealCredential } from "./credentials.js";
 
 /**
  * The Connected Account store — a Client's social destinations.
@@ -159,6 +159,39 @@ export async function findAccount(
 }
 
 /**
+ * A live account's destination *and* its usable credential — the one read path
+ * that unseals one, and deliberately the only one.
+ *
+ * It exists because connecting Instagram is an act of the connected Page: the IG
+ * account is reachable only through the Page's own token (ADR 0005), and by then
+ * the authorizing person's token is long gone. So the Page's stored credential is
+ * genuinely the input to that flow.
+ *
+ * Kept separate from {@link findAccount} rather than folded into it, so that the
+ * ordinary read path still cannot return a token by accident: reaching a
+ * credential takes calling the function whose name says so.
+ *
+ * Returns null unless the account is `connected` — a disconnected or expired slot
+ * has no credential we may use.
+ */
+export async function openAccountCredential(
+  pool: pg.Pool,
+  cipher: SecretCipher,
+  clientId: string,
+  platform: Platform,
+): Promise<{ externalId: string; credential: PlatformCredential } | null> {
+  const { rows } = await pool.query<{ external_id: string; credential: string }>(
+    `SELECT external_id, credential FROM connected_accounts
+     WHERE client_id = $1 AND platform = $2 AND status = 'connected'
+       AND credential IS NOT NULL AND external_id IS NOT NULL`,
+    [clientId, platform],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return { externalId: row.external_id, credential: openCredential(cipher, row.credential) };
+}
+
+/**
  * Unlink a Client's account for a platform, dropping the credential with it —
  * a token we no longer have permission to use is a liability, not an
  * optimization for a possible reconnect.
@@ -179,24 +212,30 @@ export async function disconnectAccount(
 }
 
 /**
- * Unlink every account a person authorized on a platform — the platform's own
- * "this person revoked you" signal (Meta's deauthorization callback).
+ * Unlink every account a person authorized across the given platforms — the
+ * platform's own "this person revoked you" signal (Meta's deauthorization
+ * callback).
  *
  * Keyed by the authorizing person rather than the Client, because that is all
- * the platform tells us. Returns how many accounts were unlinked.
+ * the platform tells us. Takes several platforms because one revocation can void
+ * more than one kind of account: a person revoking us on Facebook also voids the
+ * Instagram accounts we reach through their Pages, since those publish with a
+ * Page token that revocation just killed.
+ *
+ * Returns how many accounts were unlinked.
  */
 export async function disconnectByPlatformUser(
   pool: pg.Pool,
   clock: Clock,
-  input: { platform: Platform; platformUserId: string },
+  input: { platforms: readonly Platform[]; platformUserId: string },
 ): Promise<number> {
   // The WHERE reads platform_user_id, which CLEARED_ON_DISCONNECT nulls — that
   // is fine (Postgres evaluates the predicate against the pre-update row) and is
   // what makes a repeated deauthorization a no-op rather than an error.
   const { rowCount } = await pool.query(
     `UPDATE connected_accounts SET ${CLEARED_ON_DISCONNECT}
-     WHERE platform = $1 AND platform_user_id = $2 AND status <> 'disconnected'`,
-    [input.platform, input.platformUserId, clock.now().toISOString()],
+     WHERE platform = ANY($1) AND platform_user_id = $2 AND status <> 'disconnected'`,
+    [input.platforms, input.platformUserId, clock.now().toISOString()],
   );
   return rowCount ?? 0;
 }

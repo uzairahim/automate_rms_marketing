@@ -21,6 +21,14 @@ export type Platform = "facebook" | "instagram" | "tiktok";
 
 export const PLATFORMS: readonly Platform[] = ["facebook", "instagram", "tiktok"];
 
+/**
+ * The platforms that are one Meta login: a Facebook Page, and the Instagram
+ * Business account linked to it. They share a transport, a token, and a
+ * revocation — a person who removes our app from their Facebook settings has
+ * taken both away, whatever the two rows in our database say.
+ */
+export const META_PLATFORMS: readonly Platform[] = ["facebook", "instagram"];
+
 /** What we ask a platform transport to publish for a single Target. */
 export interface PublishRequest {
   platform: Platform;
@@ -119,6 +127,50 @@ export interface FacebookPage {
   name: string;
   /** The Page access token — what we actually publish with, not the user token. */
   credential: PlatformCredential;
+  /**
+   * The Instagram Business/Creator account linked to this Page, if it has one.
+   *
+   * Carried here because refreshing an Instagram credential is the only way to
+   * find out which Page a given IG account still hangs off: the refresh re-derives
+   * Page tokens from the user token and has to match one back to the stored IG id.
+   * The *connect* path does not use this — it asks the Page directly (see
+   * {@link Publisher.listInstagramAccounts}), because by then the user token is
+   * long gone.
+   */
+  instagram?: InstagramAccount;
+}
+
+/**
+ * An Instagram account we can publish to — necessarily a Business/Creator account
+ * linked to a Facebook Page (ADR 0005).
+ *
+ * A personal Instagram account can never appear as one of these, because the only
+ * API that names them (`instagram_business_account` on a Page) does not return
+ * one. That is the enforcement: not a check we perform, but a shape the platform
+ * refuses to give us.
+ */
+export interface InstagramAccount {
+  /** The IG Business account id — what Content Publishing targets. */
+  id: string;
+  /** The @handle, for the User to recognize what is linked. */
+  username: string;
+  /**
+   * What publishes to it: the *Page's* token. Instagram has no token of its own —
+   * publishing to an IG Business account is an act of the Page it is linked to.
+   */
+  credential: PlatformCredential;
+}
+
+/**
+ * The TikTok account a credential authorizes. Always exactly one: TikTok's OAuth
+ * authorizes a single account, so unlike Facebook there is nothing to choose
+ * between and no dead-end to guide out of.
+ */
+export interface TikTokAccount {
+  /** TikTok's `open_id` — durable for our app, and what we publish to. */
+  id: string;
+  /** The account's display name, for the User to recognize what is linked. */
+  displayName: string;
 }
 
 /**
@@ -155,6 +207,32 @@ export interface Publisher {
    * @throws {PublisherError} if the platform rejects the credential.
    */
   listFacebookPages(credential: PlatformCredential): Promise<FacebookPage[]>;
+
+  /**
+   * The Instagram Business/Creator accounts linked to a Page (ADR 0005). At most
+   * one — a Page links to a single IG account — but an array, because zero is the
+   * case that matters: it means the Page has no eligible account, and the User
+   * needs guidance to convert theirs, not an error.
+   *
+   * Takes the *Page's* credential rather than the authorizing person's, because
+   * that is what we still hold once a Page is connected: the user token is
+   * dropped when the handshake ends. It is also the only thing a hand-pasted Page
+   * token (ADR 0008) could ever supply.
+   *
+   * @throws {PublisherError} if the platform rejects the credential.
+   */
+  listInstagramAccounts(
+    credential: PlatformCredential,
+    pageId: string,
+  ): Promise<InstagramAccount[]>;
+
+  /**
+   * Who a freshly-exchanged TikTok credential belongs to. TikTok's OAuth
+   * authorizes exactly one account, so this identifies rather than offers.
+   *
+   * @throws {PublisherError} if the platform rejects the credential.
+   */
+  fetchTikTokAccount(credential: PlatformCredential): Promise<TikTokAccount>;
 
   /**
    * Extend a credential nearing expiry, for the token-refresh job.

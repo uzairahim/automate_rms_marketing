@@ -53,6 +53,15 @@ export interface Config {
     appId?: string;
     appSecret?: string;
   };
+  /**
+   * Our TikTok app (Slice 7). Absent in local dev, in which case TikTok falls
+   * back to the fake Publisher independently of Meta — the two platforms are two
+   * reviews on two timelines, so either may be live while the other is not.
+   */
+  tiktok: {
+    clientKey?: string;
+    clientSecret?: string;
+  };
 }
 
 function required(name: string): string {
@@ -83,6 +92,10 @@ export function loadConfig(): Config {
     meta: {
       appId: process.env.META_APP_ID,
       appSecret: process.env.META_APP_SECRET,
+    },
+    tiktok: {
+      clientKey: process.env.TIKTOK_CLIENT_KEY,
+      clientSecret: process.env.TIKTOK_CLIENT_SECRET,
     },
   };
 }

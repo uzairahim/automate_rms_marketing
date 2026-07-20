@@ -70,11 +70,20 @@ approvals are the long pole and must start on day one.
 - Verify the **redirect domain**.
 
 ### Scopes
+All three are requested at login (Slice 7) rather than added later, because
+TikTok audits a scope set — and because a creator who has consented once should
+not be sent back through consent the day our audit clears.
+
 | Scope | What it unlocks |
 |---|---|
 | `user.info.basic` | Basic account identity |
 | `video.upload` | Upload a video to the user's TikTok **drafts/inbox** |
 | `video.publish` | **Direct-post** a public video (audit-gated) |
+
+### Credentials
+`TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET`. Unset, TikTok falls back to the
+fake Publisher independently of Meta's — the two apps are separate reviews on
+separate timelines, so either can be live while the other is not.
 
 ### Audit requirements
 - **Direct posting to a public audience requires passing TikTok's app audit.**
@@ -103,14 +112,21 @@ approvals are the long pole and must start on day one.
   must be configured for the endpoint to work at all.
 - HTTPS everywhere, with our OAuth **redirect URIs** registered per app.
   Meta does **not** accept wildcard redirect URIs, so a per-Client-subdomain
-  callback is impossible. We register exactly one — `<OAUTH_REDIRECT_BASE_URL>` +
-  `/oauth/facebook/callback` — and re-tenant the returning User from the
-  server-side `oauth_states` row rather than from the host they land on. Add that
-  one URL to the app's *Valid OAuth Redirect URIs*.
-- Facebook login requests these scopes (Slice 6): `pages_show_list`,
-  `pages_manage_posts`, `pages_read_engagement`, `business_management`.
+  callback is impossible. We register exactly one per platform —
+  `<OAUTH_REDIRECT_BASE_URL>` + `/oauth/facebook/callback`, and the same with
+  `/oauth/tiktok/callback` in the TikTok app — and re-tenant the returning User
+  from the server-side `oauth_states` row rather than from the host they land on.
+  Add each URL to its app's redirect URI allowlist (*Valid OAuth Redirect URIs*
+  in Meta's).
+- Facebook login requests these scopes (Slices 6–7): `pages_show_list`,
+  `pages_manage_posts`, `pages_read_engagement`, `business_management`,
+  `instagram_basic`, `instagram_content_publish`.
   `pages_show_list` is the one ADR 0005 depends on — it is what lets us ask which
-  Pages a person manages instead of taking their word for it.
+  Pages a person manages instead of taking their word for it. The two Instagram
+  scopes are requested **here**, at the Facebook login, because Instagram has no
+  consent screen of its own: an IG Business account is connected from an
+  already-connected Page (`GET /{page-id}?fields=instagram_business_account`), so
+  this login is the only chance to ask.
 - Media storage with public URLs (for IG, and as the upload source generally).
 
 ---

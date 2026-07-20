@@ -13,3 +13,9 @@ Default vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Verifying a change
+
+Launching the app and driving it end-to-end (infra, API, SPA, provisioning a
+Client, clicking the OAuth connect flows against the fake Publisher). See
+`.claude/skills/verify/SKILL.md`.
