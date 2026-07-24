@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { Clock } from "../core/clock.js";
 import type { Publisher } from "../core/publisher.js";
+import { markTokenExpiredForPlatform } from "../connections/accounts.js";
 import { findMediaForPost, settleMediaForPost } from "../media/media.js";
 import {
   findTarget,
@@ -58,6 +59,24 @@ export async function attemptPublish(
       externalId: result.externalId,
       permalink: result.permalink ?? null,
       error: null,
+      retryCount: target.retryCount,
+      nextRetryAt: null,
+    });
+  }
+
+  // A dead token (ADR 0008) will not come back in a minute, so retrying it only
+  // burns the 2x1-min budget and, for a Scheduled Post, the 60-minute grace
+  // window before anyone learns the token needs regenerating (PRD #1). Fail this
+  // Target now — even on the auto path — and flip the Connected Account to
+  // `token_expired` so the User is sent to reconnect rather than left to a Post
+  // that quietly failed.
+  if (result.reason === "auth") {
+    await markTokenExpiredForPlatform(pool, clock, post.clientId, target.platform);
+    return recordTargetOutcome(pool, clock, target.id, {
+      status: "failed",
+      externalId: null,
+      permalink: null,
+      error: result.error,
       retryCount: target.retryCount,
       nextRetryAt: null,
     });

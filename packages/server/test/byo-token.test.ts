@@ -11,6 +11,7 @@ import { FakePublisher } from "../src/core/fake-publisher.js";
 import { createSecretCipher } from "../src/core/crypto.js";
 import { refreshDueTokens } from "../src/connections/token-refresh.js";
 import { recordDailySnapshots } from "../src/analytics/snapshot-job.js";
+import { publishDuePosts } from "../src/posts/scheduling.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
 
 /**
@@ -40,6 +41,7 @@ const PASTED_TOKEN = "EAABllongLivedPageToken";
 describe("Bring-your-own-token fallback (Meta)", () => {
   let db: TestPostgres;
   let app: FastifyInstance;
+  let mediaDir: string;
   const clock = new TestClock(NOW);
   const publisher = new FakePublisher();
   const cipher = createSecretCipher(TEST_ENCRYPTION_KEY);
@@ -49,6 +51,7 @@ describe("Bring-your-own-token fallback (Meta)", () => {
   beforeAll(async () => {
     db = await startTestPostgres();
     app = buildTestApp({ pool: db.pool, clock, publisher, tokenCipher: cipher });
+    mediaDir = app.deps.mediaDir;
     await app.ready();
   });
 
@@ -326,6 +329,115 @@ describe("Bring-your-own-token fallback (Meta)", () => {
         payload: { text: "Back in business", platforms: ["facebook"] },
       });
       expect(publish.statusCode).toBe(201);
+    });
+  });
+
+  /**
+   * Proactively surfacing a dead pasted token (PRD #1, the token-death-detection-lag
+   * pattern). A hand-pasted token cannot auto-refresh, so the refresh job never
+   * touches it; the first thing to *read* through it is the daily snapshot. That
+   * job must turn a dead-token read into the `token_expired` reconnect state —
+   * before a scheduled Post is the thing that discovers it by burning its retries
+   * and its grace window. And a token that dies at publish time must fail its
+   * Target cleanly on the first attempt, not after two doomed auto-retries.
+   */
+  describe("Proactive token-death detection", () => {
+    it("the daily snapshot flips a dead pasted token to token_expired, before any Post needs it", async () => {
+      const { auth } = await client();
+      await provideToken(auth);
+      // The token the Client pasted has since been invalidated on Meta's side.
+      publisher.scriptAccountMetricsAuthFailure(
+        "facebook",
+        "Error validating access token: Session has expired.",
+      );
+
+      const outcome = await recordDailySnapshots(db.pool, clock, cipher, publisher);
+
+      // Not merely skipped for the day: the account is moved to reconnect.
+      expect(outcome).toMatchObject({ recorded: 0, expired: 1 });
+      expect(await facebookConnection(auth)).toMatchObject({
+        status: "token_expired",
+        externalId: "page-a",
+      });
+    });
+
+    it("a transient read failure only skips the day — a live account is never flipped to reconnect", async () => {
+      const { auth } = await client();
+      await provideToken(auth);
+      // A throttle/outage, not a dead token: tomorrow's read may well succeed.
+      publisher.scriptAccountMetricsFailure(
+        "facebook",
+        "Application request limit reached.",
+      );
+
+      const outcome = await recordDailySnapshots(db.pool, clock, cipher, publisher);
+
+      expect(outcome).toMatchObject({ recorded: 0, skipped: 1, expired: 0 });
+      expect(await facebookConnection(auth)).toMatchObject({ status: "connected" });
+    });
+
+    it("a token that dies at publish time fails the Target on the first attempt and flips the account to reconnect", async () => {
+      const { auth } = await client("acme", { facebook: true });
+      await provideToken(auth);
+      // The gate passes (still `connected`), then the publish itself hits the dead token.
+      publisher.scriptAuthFailure(
+        "facebook",
+        "Error validating access token: the user has not authorized application.",
+      );
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/posts",
+        headers: auth,
+        payload: { text: "Hello", platforms: ["facebook"] },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const target = (res.json().targets as Array<{ platform: string } & Record<string, unknown>>).find(
+        (t) => t.platform === "facebook",
+      );
+      // Terminal on the first attempt: no auto-retry scheduled (still `failed`,
+      // retryCount 0), so the 2x1-min budget is never spent on a dead token.
+      expect(target).toMatchObject({ status: "failed", retryCount: 0 });
+      expect(publisher.sentTo("facebook")).toHaveLength(1);
+      // And the account is now in the reconnect state the User can act on.
+      expect(await facebookConnection(auth)).toMatchObject({ status: "token_expired" });
+    });
+
+    it("a Scheduled Post whose token has died fails cleanly on the first tick, not after burning the grace window", async () => {
+      const { auth } = await client("acme", { facebook: true });
+      await provideToken(auth);
+
+      // Schedule a Post half an hour out.
+      const scheduledAt = new Date(NOW.getTime() + 30 * 60_000).toISOString();
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/posts",
+        headers: auth,
+        payload: { text: "Later", platforms: ["facebook"], scheduledAt },
+      });
+      expect(created.statusCode).toBe(201);
+      const postId = created.json().post.id as string;
+
+      // Before it is due, the daily snapshot discovers the token is dead.
+      publisher.scriptAccountMetricsAuthFailure("facebook", "Session has expired.");
+      await recordDailySnapshots(db.pool, clock, cipher, publisher);
+      expect(await facebookConnection(auth)).toMatchObject({ status: "token_expired" });
+
+      // The Post comes due, well within the 60-minute grace window, and fires.
+      clock.set(new Date(NOW.getTime() + 31 * 60_000));
+      publisher.scriptAuthFailure("facebook", "Session has expired.");
+      const outcome = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      expect(outcome).toMatchObject({ due: 1, fired: 1 });
+
+      // The Target is Failed on this first attempt — not left `pending` to burn
+      // its retries and drift past the grace window before anyone notices.
+      const detail = await app.inject({ method: "GET", url: `/api/posts/${postId}`, headers: auth });
+      const target = (detail.json().targets as Array<{ platform: string } & Record<string, unknown>>).find(
+        (t) => t.platform === "facebook",
+      );
+      expect(target).toMatchObject({ status: "failed", retryCount: 0 });
+      expect(publisher.sentTo("facebook")).toHaveLength(1);
     });
   });
 });

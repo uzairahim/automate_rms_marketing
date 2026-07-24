@@ -2,6 +2,7 @@ import type pg from "pg";
 import type { Clock } from "../core/clock.js";
 import type { SecretCipher } from "../core/crypto.js";
 import { PublisherError, type Platform, type Publisher } from "../core/publisher.js";
+import { markTokenExpired } from "./accounts.js";
 import { openCredential, sealCredential } from "./credentials.js";
 
 /**
@@ -115,13 +116,12 @@ export async function refreshDueTokens(
       // blaming the Client's token, so it is re-thrown.
       if (!(err instanceof PublisherError)) throw err;
 
-      await pool.query(
-        `UPDATE connected_accounts SET
-           status     = 'token_expired',
-           updated_at = $2
-         WHERE id = $1`,
-        [row.id, clock.now().toISOString()],
-      );
+      // Unlike the snapshot job — which branches on PublisherError.reason,
+      // because a *read* can be refused by a mere throttle — a refusal to *renew*
+      // is terminal whatever its reason: this token is already inside its expiry
+      // window and we have just failed to extend it, so there is no later attempt
+      // that helps. The account moves to token_expired for the User to reconnect.
+      await markTokenExpired(pool, clock, row.id);
       outcome.expired += 1;
     }
   }

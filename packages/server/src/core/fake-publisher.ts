@@ -125,9 +125,19 @@ export class FakePublisher implements Publisher {
     return this;
   }
 
-  /** Script a platform to fail with a given error message. */
+  /** Script a platform to fail with a given error message (a transient refusal). */
   scriptFailure(platform: Platform, error: string): this {
     this.scripts.set(platform, () => ({ ok: false, error }));
+    return this;
+  }
+
+  /**
+   * Script a platform's publish to fail because the token is dead (ADR 0008) —
+   * the terminal, `reason: "auth"` refusal the publish path must not retry and
+   * that flips the Connected Account to `token_expired`.
+   */
+  scriptAuthFailure(platform: Platform, error: string): this {
+    this.scripts.set(platform, () => ({ ok: false, error, reason: "auth" }));
     return this;
   }
 
@@ -170,10 +180,22 @@ export class FakePublisher implements Publisher {
     return this;
   }
 
-  /** Script the platform to refuse an account-metrics read (throttled, down). */
+  /** Script the platform to refuse an account-metrics read (throttled, down) — a transient refusal. */
   scriptAccountMetricsFailure(platform: Platform, error: string): this {
     this.accountMetricsScripts.set(platform, () => {
       throw new PublisherError(platform, error);
+    });
+    return this;
+  }
+
+  /**
+   * Script an account-metrics read to fail because the token is dead (`reason:
+   * "auth"`) — how the daily snapshot job discovers a hand-pasted token that can
+   * no longer read, and surfaces the `token_expired` reconnect state (ADR 0008).
+   */
+  scriptAccountMetricsAuthFailure(platform: Platform, error: string): this {
+    this.accountMetricsScripts.set(platform, () => {
+      throw new PublisherError(platform, error, "auth");
     });
     return this;
   }

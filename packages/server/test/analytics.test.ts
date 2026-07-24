@@ -185,7 +185,7 @@ describe("Account-level analytics dashboard + daily snapshot job", () => {
     });
 
     const outcome = await runJob();
-    expect(outcome).toEqual({ recorded: 1, skipped: 0 });
+    expect(outcome).toEqual({ recorded: 1, skipped: 0, expired: 0 });
 
     const res = await getAnalytics(auth);
     expect(res.statusCode).toBe(200);
@@ -350,7 +350,7 @@ describe("Account-level analytics dashboard + daily snapshot job", () => {
     publisher.scriptAccountMetricsFailure("tiktok", "TikTok analytics are throttled.");
 
     const outcome = await runJob();
-    expect(outcome).toEqual({ recorded: 1, skipped: 1 });
+    expect(outcome).toEqual({ recorded: 1, skipped: 1, expired: 0 });
 
     const body = getBody(await getAnalytics(auth));
     // Facebook recorded; TikTok present (still connected) but with no point today.

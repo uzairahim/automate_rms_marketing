@@ -32,9 +32,9 @@ export function startMetricSnapshotWorker(deps: {
         deps.cipher,
         deps.publisher,
       );
-      if (outcome.recorded || outcome.skipped) {
+      if (outcome.recorded || outcome.skipped || outcome.expired) {
         console.log(
-          `[metric-snapshot] recorded ${outcome.recorded}, skipped ${outcome.skipped}`,
+          `[metric-snapshot] recorded ${outcome.recorded}, skipped ${outcome.skipped}, marked ${outcome.expired} token_expired`,
         );
       }
       return outcome;

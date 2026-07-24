@@ -11,6 +11,7 @@ import {
   type PlatformCredential,
   type PostMetrics,
   type PostReadRequest,
+  type PublisherFailureReason,
   type PublishRequest,
   type PublishResult,
   type Publisher,
@@ -73,6 +74,24 @@ const PAGE_FIELDS = "id,name,access_token,instagram_business_account{id,username
 /** Meta's error envelope. */
 interface GraphError {
   error?: { message?: string; type?: string; code?: number };
+}
+
+/**
+ * Classify a Graph API error as a dead credential (`auth`) or a transient
+ * refusal — the distinction the daily snapshot and publish paths act on (ADR
+ * 0008, PRD #1).
+ *
+ * Keyed strictly on **code 190**, Meta's canonical invalid/expired-token error
+ * (its token-death subcodes — 458/460/463/467/492 — all ride under 190). We
+ * deliberately do *not* key on `type: "OAuthException"`: Meta stamps that same
+ * type on rate-limit errors (codes 4, 17, 32, 613), and treating a throttle as
+ * `auth` would flip a perfectly live account to `token_expired` and refuse its
+ * posts — the precise false positive this classification exists to avoid.
+ * Anything that is not unmistakably a dead token is transient, so the worst case
+ * is a retry, never a wrongful reconnect prompt.
+ */
+export function graphFailureReason(error: GraphError["error"]): PublisherFailureReason {
+  return error?.code === 190 ? "auth" : "transient";
 }
 
 export class MetaPublisher implements Publisher {
@@ -393,8 +412,14 @@ export class MetaPublisher implements Publisher {
     }
 
     if (!response.ok) {
-      const message = (body as GraphError)?.error?.message ?? text;
-      throw new PublisherError("facebook", message);
+      const graphError = (body as GraphError)?.error;
+      const message = graphError?.message ?? text;
+      // A dead token becomes an `auth` refusal so a background read — the daily
+      // snapshot — moves the account to `token_expired` rather than retrying a
+      // credential that will never recover (ADR 0008, PRD #1). See
+      // {@link graphFailureReason} for why this is code 190 only, not every
+      // OAuthException.
+      throw new PublisherError("facebook", message, graphFailureReason(graphError));
     }
     return body as T;
   }

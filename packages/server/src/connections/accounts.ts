@@ -192,6 +192,55 @@ export async function openAccountCredential(
 }
 
 /**
+ * Move a Connected Account into the `token_expired` reconnect state — the single
+ * place that transition is made, so every discoverer of a dead token (the token
+ * refresh job, the daily snapshot, a publish that hits a dead token) records it
+ * the same way.
+ *
+ * Guarded to `status = 'connected'`: a slot that was disconnected or already
+ * expired is left as it is, so a stray dead-token signal can never resurrect a
+ * link the User deliberately dropped. The credential is deliberately *kept* —
+ * unlike a disconnect — because the whole point of the state is that the same
+ * Page is still linked and the User is regenerating a token for it (ADR 0008).
+ */
+async function expireTokenWhere(
+  pool: pg.Pool,
+  clock: Clock,
+  predicate: string,
+  params: unknown[],
+): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE connected_accounts
+       SET status = 'token_expired', updated_at = $${params.length + 1}
+     WHERE ${predicate} AND status = 'connected'`,
+    [...params, clock.now().toISOString()],
+  );
+  return (rowCount ?? 0) > 0;
+}
+
+/** Expire a Connected Account by its id — the background jobs, which hold the row id. */
+export async function markTokenExpired(
+  pool: pg.Pool,
+  clock: Clock,
+  accountId: string,
+): Promise<boolean> {
+  return expireTokenWhere(pool, clock, "id = $1", [accountId]);
+}
+
+/**
+ * Expire a Client's account for a platform — the publish path, which knows a
+ * Target by its Client and platform rather than the account row id.
+ */
+export async function markTokenExpiredForPlatform(
+  pool: pg.Pool,
+  clock: Clock,
+  clientId: string,
+  platform: Platform,
+): Promise<boolean> {
+  return expireTokenWhere(pool, clock, "client_id = $1 AND platform = $2", [clientId, platform]);
+}
+
+/**
  * Unlink a Client's account for a platform, dropping the credential with it —
  * a token we no longer have permission to use is a liability, not an
  * optimization for a possible reconnect.

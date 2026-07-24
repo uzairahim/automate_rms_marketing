@@ -38,6 +38,19 @@ export interface PublishRequest {
   mediaUrl?: string;
 }
 
+/**
+ * Why a platform refused, once we can tell the two apart.
+ *
+ * `auth` means the credential itself is dead — an expired/revoked token, or a
+ * hand-pasted one that can no longer publish (ADR 0008). It will not fix itself
+ * on a retry, so it is terminal: the Connected Account moves to `token_expired`
+ * and the User must reconnect. `transient` is everything else — a throttle, a
+ * brief outage — which a later attempt may well succeed at, so the ordinary
+ * retry/skip behavior applies. Defaults to `transient` everywhere: only a caller
+ * that can actually recognize a dead token upgrades a refusal to `auth`.
+ */
+export type PublisherFailureReason = "auth" | "transient";
+
 /** The outcome of a single publish attempt for one Target. */
 export type PublishResult =
   | {
@@ -51,6 +64,12 @@ export type PublishResult =
       ok: false;
       /** Human-readable reason, surfaced on the Target for a manual retry. */
       error: string;
+      /**
+       * Why it failed. `auth` (a dead token) is terminal — the publish path
+       * skips the auto-retries and flips the Connected Account to
+       * `token_expired`; absent or `transient` keeps the normal 2x retry.
+       */
+      reason?: PublisherFailureReason;
     };
 
 /**
@@ -252,6 +271,14 @@ export class PublisherError extends Error {
   constructor(
     readonly platform: Platform,
     message: string,
+    /**
+     * Whether the platform refused because the credential is dead (`auth`) or for
+     * a transient reason (`transient`, the default). A background job that reads
+     * through a token — the daily snapshot, the token refresh — uses this to tell
+     * "reconnect this account now" from "try again tomorrow" (see
+     * {@link PublisherFailureReason}).
+     */
+    readonly reason: PublisherFailureReason = "transient",
   ) {
     super(message);
     this.name = "PublisherError";

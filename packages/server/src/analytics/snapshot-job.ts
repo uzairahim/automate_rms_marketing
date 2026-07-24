@@ -3,6 +3,7 @@ import type { Clock } from "../core/clock.js";
 import type { SecretCipher } from "../core/crypto.js";
 import { PublisherError, type Platform, type Publisher } from "../core/publisher.js";
 import { openCredential } from "../connections/credentials.js";
+import { markTokenExpired } from "../connections/accounts.js";
 import { recordSnapshot } from "./metric-snapshots.js";
 
 /**
@@ -24,8 +25,17 @@ import { recordSnapshot } from "./metric-snapshots.js";
 export interface SnapshotOutcome {
   /** Accounts whose numbers were recorded this run. */
   recorded: number;
-  /** Accounts the platform refused to report on, skipped for today. */
+  /** Accounts the platform transiently refused to report on, skipped for today. */
   skipped: number;
+  /**
+   * Accounts whose token turned out to be dead, now moved to `token_expired`.
+   *
+   * This is the job earning its keep beyond analytics (PRD #1): a hand-pasted
+   * Meta token (ADR 0008) cannot auto-refresh, so the daily read is often the
+   * first thing to touch it after it dies — and surfacing the reconnect state
+   * here is what keeps a scheduled Post from being the one to discover it.
+   */
+  expired: number;
 }
 
 interface AccountRow {
@@ -77,7 +87,7 @@ export async function recordDailySnapshots(
      ORDER BY ca.id`,
   );
 
-  const outcome: SnapshotOutcome = { recorded: 0, skipped: 0 };
+  const outcome: SnapshotOutcome = { recorded: 0, skipped: 0, expired: 0 };
   const now = clock.now();
 
   for (const row of rows) {
@@ -97,12 +107,23 @@ export async function recordDailySnapshots(
       });
       outcome.recorded += 1;
     } catch (err) {
-      // A platform refusing a read is ordinary operation (throttled, briefly
-      // down) — skip today's snapshot for that account and move on. Anything else
-      // (a decrypt failure from the wrong key, a DB error) is a real fault worth
+      // A decrypt failure from the wrong key or a DB error is a real fault worth
       // surfacing, so it is re-thrown, mirroring the token-refresh job.
       if (!(err instanceof PublisherError)) throw err;
-      outcome.skipped += 1;
+
+      if (err.reason === "auth") {
+        // The token is dead, not merely throttled. Surface the reconnect state
+        // now — from the job that touches the token first — so the User can act
+        // before a scheduled Post hits the same dead token and burns its retries
+        // and grace window discovering it (PRD #1). Guarded to `connected`, so a
+        // slot already expired or since disconnected is left as it is.
+        await markTokenExpired(pool, clock, row.id);
+        outcome.expired += 1;
+      } else {
+        // A transient refusal (throttled, briefly down): skip today's snapshot
+        // for that account and move on — tomorrow's read may well succeed.
+        outcome.skipped += 1;
+      }
     }
   }
 
