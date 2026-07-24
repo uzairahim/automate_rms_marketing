@@ -4,6 +4,7 @@ import {
   connectInstagram,
   disconnectPlatform,
   listConnections,
+  provideFacebookToken,
   startFacebookConnect,
   startTikTokConnect,
   type ConnectedAccount,
@@ -138,6 +139,22 @@ export function Connections() {
             {connection.platform === "instagram" && instagramGuidance && (
               <InstagramGuidance message={instagramGuidance} />
             )}
+
+            {/* The bring-your-own-token fallback (ADR 0008): shown on the Facebook
+                row whenever it isn't connected — to link a Page without our own
+                app review, or to regenerate a token that expired. */}
+            {connection.platform === "facebook" && connection.status !== "connected" && (
+              <FacebookTokenForm
+                busy={busy === "facebook"}
+                expired={connection.status === "token_expired"}
+                onSubmit={async (token, pageId, displayName) =>
+                  run("facebook", async () => {
+                    await provideFacebookToken(token, pageId, displayName);
+                    await refresh();
+                  })
+                }
+              />
+            )}
           </li>
         ))}
       </ul>
@@ -163,6 +180,79 @@ function InstagramGuidance({ message }: { message: string }) {
         How to switch to a Business or Creator account
       </a>
     </div>
+  );
+}
+
+/**
+ * Paste a long-lived Page token instead of running Facebook login (ADR 0008,
+ * Option E). A collapsible affordance so the ordinary OAuth button stays the
+ * headline; it opens to three fields — the token, the Page id, and an optional
+ * name — because that is exactly what a Client copies out of the Graph API
+ * Explorer. When a Page's token has expired this is also how it is regenerated,
+ * so the copy leads with that.
+ */
+function FacebookTokenForm({
+  busy,
+  expired,
+  onSubmit,
+}: {
+  busy: boolean;
+  expired: boolean;
+  onSubmit: (token: string, pageId: string, displayName: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState("");
+  const [pageId, setPageId] = useState("");
+  const [displayName, setDisplayName] = useState("");
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} style={linkButtonStyle}>
+        {expired ? "Paste a new Page token" : "Paste a Page token instead"}
+      </button>
+    );
+  }
+
+  return (
+    <form
+      style={tokenFormStyle}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSubmit(token.trim(), pageId.trim(), displayName.trim());
+      }}
+    >
+      <label style={fieldLabelStyle}>
+        Page access token
+        {/* Masked and never autofilled: the token grants full Page control and
+            must not be shoulder-surfed or stored by the browser (ADR 0006/0008). */}
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          autoComplete="off"
+          style={inputStyle}
+        />
+      </label>
+      <label style={fieldLabelStyle}>
+        Page ID
+        <input value={pageId} onChange={(e) => setPageId(e.target.value)} style={inputStyle} />
+      </label>
+      <label style={fieldLabelStyle}>
+        Page name (optional)
+        <input
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          style={inputStyle}
+        />
+      </label>
+      <button
+        type="submit"
+        disabled={busy || !token.trim() || !pageId.trim()}
+        style={{ ...primaryButtonStyle, marginTop: 0 }}
+      >
+        Save token
+      </button>
+    </form>
   );
 }
 
@@ -206,4 +296,41 @@ const secondaryButtonStyle = {
   borderRadius: "0.25rem",
   fontSize: "0.938rem",
   cursor: "pointer",
+} as const;
+
+const linkButtonStyle = {
+  display: "inline-block",
+  margin: "0 0 0.875rem",
+  padding: 0,
+  background: "none",
+  border: "none",
+  color: "var(--brand-primary)",
+  fontSize: "0.875rem",
+  cursor: "pointer",
+} as const;
+
+const tokenFormStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.625rem",
+  padding: "0.875rem",
+  marginBottom: "0.875rem",
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: "0.25rem",
+} as const;
+
+const fieldLabelStyle = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "0.25rem",
+  fontSize: "0.813rem",
+  color: "#475569",
+} as const;
+
+const inputStyle = {
+  padding: "0.5rem",
+  border: "1px solid #cbd5e1",
+  borderRadius: "0.25rem",
+  fontSize: "0.875rem",
 } as const;

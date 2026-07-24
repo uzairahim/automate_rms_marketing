@@ -295,6 +295,52 @@ export async function registerConnectionRoutes(app: FastifyInstance): Promise<vo
     },
   );
 
+  // Provide a hand-pasted long-lived Page token (ADR 0008, Option E) — the
+  // bring-your-own-token fallback for when our own app review is unavailable. The
+  // Client generates the token from their *own* Meta app and hands us the token
+  // and Page id; it goes into the *same* encrypted slot an OAuth token would, and
+  // is consumed identically by the Publisher (ADR 0002/0006). Reconnecting a
+  // token_expired Page is the same call — the upsert flips it back to connected.
+  //
+  // Meta only (facebook): an IG Business account is then reached through this
+  // Page's pasted token via `/instagram/connect`, exactly as after an OAuth login.
+  // TikTok has no Graph-Explorer equivalent, so there is no such route for it.
+  app.post<{ Body: { token?: unknown; pageId?: unknown; displayName?: unknown } }>(
+    "/api/connections/facebook/token",
+    async (request, reply) => {
+      const ctx = await authorizeForPlatform(request, reply, "facebook");
+      if (!ctx) return reply;
+
+      const { token, pageId, displayName } = request.body ?? {};
+      if (typeof token !== "string" || !token || typeof pageId !== "string" || !pageId) {
+        return reply.code(400).send({
+          error: "invalid_body",
+          message: "token and pageId are required.",
+        });
+      }
+
+      const { pool, clock, tokenCipher } = app.deps;
+      const connection = await connectAccount(pool, clock, tokenCipher, {
+        clientId: ctx.client.id,
+        platform: "facebook",
+        externalId: pageId,
+        // A name is nice for the User to recognize, but Option E only guarantees
+        // the token and Page id — fall back to the id when none is provided.
+        displayName: typeof displayName === "string" && displayName ? displayName : pageId,
+        credential: {
+          accessToken: token,
+          // The defining property of a pasted token (ADR 0008): we did not run the
+          // OAuth flow, so we cannot silently extend it. The refresh job skips it,
+          // and when it dies only a human can regenerate it — which is why the
+          // token_expired state exists.
+          refreshable: false,
+        },
+      });
+
+      return reply.code(200).send({ connection: connectionView(connection) });
+    },
+  );
+
   // Connect Instagram (PRD stories 21–22). One step and no redirect, because
   // there is no Instagram login to send anyone to: an IG Business account is a
   // property of a Facebook Page, so all this does is ask the Page we already

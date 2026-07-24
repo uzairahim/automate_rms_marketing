@@ -100,6 +100,18 @@ export const selectFacebookPage = (state: string, pageId: string) =>
   });
 
 /**
+ * Provide a hand-pasted long-lived Facebook Page token (ADR 0008, Option E) — the
+ * bring-your-own-token fallback for when our own app review is unavailable. It
+ * lands in the same Connected Account slot an OAuth login would, and doubles as
+ * the way to regenerate a token_expired Page. Meta only.
+ */
+export const provideFacebookToken = (token: string, pageId: string, displayName: string) =>
+  apiFetch<{ connection: ConnectedAccount }>("/api/connections/facebook/token", {
+    method: "POST",
+    body: { token, pageId, displayName },
+  });
+
+/**
  * Connect Instagram. No redirect and no callback screen: an IG Business account
  * is reached through the already-connected Page, so this one call is the whole
  * flow (ADR 0005).

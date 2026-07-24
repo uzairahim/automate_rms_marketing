@@ -174,6 +174,21 @@ async function resolveCompose(
 
     for (const platform of platforms) {
       const account = await findAccount(pool, clientId, platform);
+      // A token_expired account is still *linked* — its token just went bad (an
+      // OAuth token the refresh job gave up on, or a hand-pasted one that died,
+      // ADR 0008). Telling the User to "connect" it would send them past the
+      // Reconnect/regenerate action that actually fixes it, so it gets its own
+      // reason — the publish is refused cleanly, never attempted (PRD story 26).
+      if (account?.status === "token_expired") {
+        return {
+          ok: false,
+          code: 409,
+          body: {
+            error: "platform_token_expired",
+            message: `Your ${platform} access has expired. Reconnect or regenerate its token before publishing.`,
+          },
+        };
+      }
       if (account?.status !== "connected") {
         return {
           ok: false,
