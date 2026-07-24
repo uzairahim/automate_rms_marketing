@@ -1,6 +1,8 @@
 import type { Clock } from "../core/clock.js";
 import {
   PublisherError,
+  type AccountMetrics,
+  type AccountMetricsRequest,
   type AuthorizeRequest,
   type ExchangeRequest,
   type FacebookPage,
@@ -192,6 +194,38 @@ export class TikTokPublisher implements Publisher {
       comments: video?.comment_count,
       shares: video?.share_count,
       views: video?.view_count,
+    };
+  }
+
+  async fetchAccountMetrics(request: AccountMetricsRequest): Promise<AccountMetrics> {
+    this.assertTikTok(request.platform);
+
+    // TikTok identifies the account by the token, so `externalId` is unused here
+    // (unlike Meta, which reads by Page id). `likes_count` is the closest thing
+    // to account-level engagement TikTok's basic API exposes; it surfaces no
+    // account-level reach/impressions series at all (ADR 0004), so reach is left
+    // absent rather than fabricated.
+    const url = `${USER_INFO_URL}?${new URLSearchParams({
+      fields: "follower_count,likes_count,video_count",
+    }).toString()}`;
+
+    const body = await this.call<{
+      data?: { user?: { follower_count?: number; likes_count?: number; video_count?: number } };
+      error?: { code?: string; message?: string };
+    }>(url, { headers: { authorization: `Bearer ${request.credential.accessToken}` } });
+
+    if (body.error?.code && body.error.code !== "ok") {
+      throw new PublisherError(
+        "tiktok",
+        tikTokErrorMessage(body, "TikTok refused the account-metrics read."),
+      );
+    }
+
+    const user = body.data?.user;
+    return {
+      followers: user?.follower_count,
+      engagement: user?.likes_count,
+      postsPublished: user?.video_count,
     };
   }
 

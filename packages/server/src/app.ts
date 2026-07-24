@@ -16,6 +16,7 @@ import { registerConnectionRoutes } from "./routes/connections.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { registerPostRoutes } from "./routes/posts.js";
 import { registerMediaRoutes } from "./routes/media.js";
+import { registerAnalyticsRoutes } from "./routes/analytics.js";
 
 /**
  * Everything the HTTP app depends on, injected at construction. This is what
@@ -112,6 +113,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // Media upload + public serve (Slice 9; ADR 0003): stored on this server's
   // own disk, ephemeral, purged once a Post's Targets have all settled.
   app.register(registerMediaRoutes);
+  // Account-level analytics dashboard (Slice 12; ADR 0004): trends read from the
+  // daily snapshots the worker records, one series per connected platform.
+  app.register(registerAnalyticsRoutes);
 
   app.get("/api/health", async () => {
     const { pool, clock } = app.deps;

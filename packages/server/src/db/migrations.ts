@@ -359,4 +359,42 @@ export const migrations: readonly Migration[] = [
         WHERE status = 'scheduled' AND scheduled_at IS NOT NULL;
     `,
   },
+  {
+    // Slice 12 — account-level analytics (ADR 0004). A daily background job
+    // snapshots a small, uniform set of account-level numbers per Connected
+    // Account so the dashboard can trend them over time with instant load and
+    // consistent cross-platform charts — the one place storing pays off, since
+    // the data is tiny (a few numeric columns per account per day), unlike Media
+    // which stays ephemeral (ADR 0003).
+    //
+    // Keyed to the Connected Account row (not the Client) because a metric is a
+    // property of one social destination. The row survives disconnect/reconnect
+    // (a disconnect only nulls the credential), so a Client's history persists
+    // across a reconnection of the same slot. Every metric column is nullable:
+    // platforms disagree on what they expose (TikTok surfaces no reach), and an
+    // unread metric is stored as NULL, never a fabricated 0.
+    name: "010_metric_snapshots",
+    sql: /* sql */ `
+      CREATE TABLE metric_snapshots (
+        id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        connected_account_id  uuid NOT NULL REFERENCES connected_accounts (id) ON DELETE CASCADE,
+        -- The calendar day this snapshot is for, in the Client's own timezone
+        -- (CONTEXT.md \`Client\`: all analytics are anchored to it). A plain date,
+        -- not a timestamp: one row per account per day is the whole grain.
+        snapshot_date         date NOT NULL,
+        -- The four account-level numbers the dashboard trends (ADR 0004).
+        followers             integer,
+        reach                 integer,
+        engagement            integer,
+        posts_published       integer,
+        created_at            timestamptz NOT NULL DEFAULT now(),
+        -- One snapshot per account per day: a re-run of the daily job updates the
+        -- day's row rather than stacking duplicates, so the job is idempotent.
+        CONSTRAINT metric_snapshots_account_date_key UNIQUE (connected_account_id, snapshot_date)
+      );
+      -- The dashboard's read: one account's series in date order. The UNIQUE
+      -- constraint above already indexes (account_id, snapshot_date), which
+      -- serves this too — no separate index needed.
+    `,
+  },
 ];

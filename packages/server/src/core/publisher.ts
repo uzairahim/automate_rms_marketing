@@ -193,6 +193,46 @@ export interface PostMetrics {
 }
 
 /**
+ * A read of one Connected Account's current account-level numbers, for the daily
+ * metric snapshot (ADR 0004). Unlike a {@link PostReadRequest}, this is keyed by
+ * the *account's* own destination id — the Page id, or TikTok `open_id` — because
+ * these are properties of the account, not of any one post.
+ *
+ * The credential is the Connected Account's, exactly as stored (the same one a
+ * publish or a per-post read uses).
+ */
+export interface AccountMetricsRequest {
+  platform: Platform;
+  credential: PlatformCredential;
+  /** The Connected Account's destination id (the Page id / TikTok `open_id`). */
+  externalId: string;
+}
+
+/**
+ * A Connected Account's current account-level numbers (ADR 0004): the small,
+ * uniform set the dashboard trends over time — followers, reach/impressions,
+ * total engagement, and posts published. Every field is optional because the
+ * platforms disagree on what they expose (TikTok's basic API surfaces almost no
+ * reach; a field we cannot read is simply absent, never a fabricated zero), yet
+ * the *shape* is identical across Facebook, Instagram, and TikTok so the
+ * dashboard charts one thing, not three.
+ *
+ * Distinct from {@link PostMetrics}, which is a single post's live engagement and
+ * is never stored — these four are snapshotted daily (CONTEXT.md `Metric
+ * Snapshot`).
+ */
+export interface AccountMetrics {
+  /** Total followers/fans of the account right now. */
+  followers?: number;
+  /** Reach or impressions over the platform's reporting window. */
+  reach?: number;
+  /** Total engagement (reactions, comments, shares, …) the platform reports. */
+  engagement?: number;
+  /** How many posts the account has published, as the platform counts them. */
+  postsPublished?: number;
+}
+
+/**
  * The TikTok account a credential authorizes. Always exactly one: TikTok's OAuth
  * authorizes a single account, so unlike Facebook there is nothing to choose
  * between and no dead-end to guide out of.
@@ -296,4 +336,15 @@ export interface Publisher {
    * that platform's metrics as unavailable without blanking the others.
    */
   fetchPostMetrics(request: PostReadRequest): Promise<PostMetrics>;
+
+  /**
+   * A Connected Account's current account-level numbers, for the daily snapshot
+   * job (ADR 0004). Read once per account per day and stored, unlike the
+   * live-only per-post reads above.
+   *
+   * @throws {PublisherError} if the platform refuses the read — the snapshot job
+   * skips that one account and carries on, so one platform's outage never stops
+   * another Client's numbers from being recorded.
+   */
+  fetchAccountMetrics(request: AccountMetricsRequest): Promise<AccountMetrics>;
 }

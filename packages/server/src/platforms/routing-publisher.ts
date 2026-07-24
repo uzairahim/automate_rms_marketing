@@ -1,4 +1,6 @@
 import {
+  type AccountMetrics,
+  type AccountMetricsRequest,
   type AuthorizeRequest,
   type ExchangeRequest,
   type FacebookPage,
@@ -69,6 +71,10 @@ export class RoutingPublisher implements Publisher {
 
   fetchPostMetrics(request: PostReadRequest): Promise<PostMetrics> {
     return this.for(request.platform).fetchPostMetrics(request);
+  }
+
+  fetchAccountMetrics(request: AccountMetricsRequest): Promise<AccountMetrics> {
+    return this.for(request.platform).fetchAccountMetrics(request);
   }
 
   private for(platform: Platform): Publisher {

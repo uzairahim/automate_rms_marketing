@@ -15,12 +15,13 @@ import { scheduleMediaPurge } from "./queue/media-purge-queue.js";
 import { startMediaPurgeWorker } from "./worker/media-purge-worker.js";
 import { schedulePostScheduler } from "./queue/post-scheduler-queue.js";
 import { startPostSchedulerWorker } from "./worker/post-scheduler-worker.js";
+import { scheduleMetricSnapshot } from "./queue/metric-snapshot-queue.js";
+import { startMetricSnapshotWorker } from "./worker/metric-snapshot-worker.js";
 
 /**
  * Worker process entrypoint. It runs the recurring jobs the PRD calls for: the
  * token-refresh job arrives with the connect flow (Slice 6), the minute
- * scheduler with Slice 10, and the daily metric snapshot follows in a later
- * slice.
+ * scheduler with Slice 10, and the daily metric snapshot with Slice 12.
  */
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -34,12 +35,13 @@ async function main(): Promise<void> {
   // Keeps every connected Page's token valid ahead of expiry (ADR 0002). The
   // same seams the API wires, injected identically here.
   const clock = new SystemClock();
+  const cipher = createSecretCipher(parseEncryptionKey(config.tokenEncryptionKey));
   const tokenRefreshQueue = await scheduleTokenRefresh(connection);
   const publisher = resolvePublisher(config, clock);
   const tokenRefreshWorker = startTokenRefreshWorker({
     pool,
     clock,
-    cipher: createSecretCipher(parseEncryptionKey(config.tokenEncryptionKey)),
+    cipher,
     publisher,
     connection,
   });
@@ -71,6 +73,18 @@ async function main(): Promise<void> {
     connection,
   });
 
+  // Snapshots each connected account's account-level numbers once a day, so the
+  // dashboard can trend them over time (Slice 12; ADR 0004). Reads through the
+  // same Publisher seam, injected identically to the other jobs.
+  const metricSnapshotQueue = await scheduleMetricSnapshot(connection);
+  const metricSnapshotWorker = startMetricSnapshotWorker({
+    pool,
+    clock,
+    cipher,
+    publisher,
+    connection,
+  });
+
   healthWorker.on("ready", () => console.log("Health worker ready"));
   healthWorker.on("failed", (job, err) =>
     console.error(`Job ${job?.id} failed:`, err),
@@ -91,6 +105,10 @@ async function main(): Promise<void> {
   postSchedulerWorker.on("failed", (job, err) =>
     console.error(`Post scheduler job ${job?.id} failed:`, err),
   );
+  metricSnapshotWorker.on("ready", () => console.log("Metric snapshot worker ready"));
+  metricSnapshotWorker.on("failed", (job, err) =>
+    console.error(`Metric snapshot job ${job?.id} failed:`, err),
+  );
 
   const shutdown = async () => {
     await healthWorker.close();
@@ -102,6 +120,8 @@ async function main(): Promise<void> {
     await mediaPurgeQueue.close();
     await postSchedulerWorker.close();
     await postSchedulerQueue.close();
+    await metricSnapshotWorker.close();
+    await metricSnapshotQueue.close();
     await pool.end();
     process.exit(0);
   };

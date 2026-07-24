@@ -1,5 +1,7 @@
 import {
   PublisherError,
+  type AccountMetrics,
+  type AccountMetricsRequest,
   type AuthorizeRequest,
   type ExchangeRequest,
   type FacebookPage,
@@ -50,6 +52,9 @@ export class FakePublisher implements Publisher {
   /** Every {@link fetchPostMetrics} request, in call order. */
   readonly metricReads: PostReadRequest[] = [];
 
+  /** Every {@link fetchAccountMetrics} request, in call order (the snapshot job's reads). */
+  readonly accountMetricReads: AccountMetricsRequest[] = [];
+
   private readonly scripts = new Map<Platform, () => PublishResult>();
 
   /** Per-platform thumbnail outcome: a URL, `null` (none), or a thrown error. */
@@ -57,6 +62,9 @@ export class FakePublisher implements Publisher {
 
   /** Per-platform metrics outcome: numbers, or a thrown error. */
   private readonly metricsScripts = new Map<Platform, () => PostMetrics>();
+
+  /** Per-platform account-metrics outcome: numbers, or a thrown error. */
+  private readonly accountMetricsScripts = new Map<Platform, () => AccountMetrics>();
 
   /** What `pages_show_list` returns. Default: a single Page. */
   private pages: FacebookPage[] = [fakePage(DEFAULT_PAGE)];
@@ -97,6 +105,14 @@ export class FakePublisher implements Publisher {
     comments: 2,
     shares: 1,
     views: 100,
+  });
+
+  /** Default account-level numbers for an account nobody scripted. */
+  private defaultAccountMetrics: () => AccountMetrics = () => ({
+    followers: 100,
+    reach: 500,
+    engagement: 30,
+    postsPublished: 5,
   });
 
   /** Script a platform to succeed, optionally with a specific external id. */
@@ -143,6 +159,20 @@ export class FakePublisher implements Publisher {
   /** Script the platform to refuse a metrics read. */
   scriptMetricsFailure(platform: Platform, error: string): this {
     this.metricsScripts.set(platform, () => {
+      throw new PublisherError(platform, error);
+    });
+    return this;
+  }
+
+  /** Script the account-level numbers a platform returns for the snapshot job. */
+  scriptAccountMetrics(platform: Platform, metrics: AccountMetrics): this {
+    this.accountMetricsScripts.set(platform, () => metrics);
+    return this;
+  }
+
+  /** Script the platform to refuse an account-metrics read (throttled, down). */
+  scriptAccountMetricsFailure(platform: Platform, error: string): this {
+    this.accountMetricsScripts.set(platform, () => {
       throw new PublisherError(platform, error);
     });
     return this;
@@ -218,9 +248,11 @@ export class FakePublisher implements Publisher {
     this.refreshRequests.length = 0;
     this.thumbnailReads.length = 0;
     this.metricReads.length = 0;
+    this.accountMetricReads.length = 0;
     this.scripts.clear();
     this.thumbnailScripts.clear();
     this.metricsScripts.clear();
+    this.accountMetricsScripts.clear();
     this.pages = [fakePage(DEFAULT_PAGE)];
     this.tikTokAccount = { id: "tiktok-open-id", displayName: "Test TikTok" };
     this.exchangeError = null;
@@ -293,6 +325,12 @@ export class FakePublisher implements Publisher {
   async fetchPostMetrics(request: PostReadRequest): Promise<PostMetrics> {
     this.metricReads.push({ ...request });
     const script = this.metricsScripts.get(request.platform) ?? this.defaultMetrics;
+    return script();
+  }
+
+  async fetchAccountMetrics(request: AccountMetricsRequest): Promise<AccountMetrics> {
+    this.accountMetricReads.push({ ...request });
+    const script = this.accountMetricsScripts.get(request.platform) ?? this.defaultAccountMetrics;
     return script();
   }
 

@@ -1,6 +1,8 @@
 import type { Clock } from "../core/clock.js";
 import {
   PublisherError,
+  type AccountMetrics,
+  type AccountMetricsRequest,
   type AuthorizeRequest,
   type ExchangeRequest,
   type FacebookPage,
@@ -275,6 +277,65 @@ export class MetaPublisher implements Publisher {
       comments: post.comments?.summary?.total_count,
       shares: post.shares?.count,
     };
+  }
+
+  async fetchAccountMetrics(request: AccountMetricsRequest): Promise<AccountMetrics> {
+    this.assertMetaPlatform(request.platform);
+    const { credential, externalId } = request;
+
+    if (request.platform === "instagram") {
+      // The IG Business account node carries its own follower and media counts;
+      // reach is a day-level Insight. Engagement has no single account-level day
+      // metric worth faking, so it is left absent (ADR 0004: absent, never zero).
+      const account = await this.graph<{ followers_count?: number; media_count?: number }>(
+        externalId,
+        { access_token: credential.accessToken, fields: "followers_count,media_count" },
+      );
+      return {
+        followers: account.followers_count,
+        postsPublished: account.media_count,
+        reach: await this.dailyInsight(externalId, credential.accessToken, "reach"),
+      };
+    }
+
+    // A Facebook Page: follower/fan counts and the total published-post count hang
+    // off the node; reach and engagement are Page Insights day metrics.
+    const page = await this.graph<{
+      followers_count?: number;
+      fan_count?: number;
+      published_posts?: { summary?: { total_count?: number } };
+    }>(externalId, {
+      access_token: credential.accessToken,
+      fields: "followers_count,fan_count,published_posts.summary(true)",
+    });
+    return {
+      followers: page.followers_count ?? page.fan_count,
+      postsPublished: page.published_posts?.summary?.total_count,
+      reach: await this.dailyInsight(externalId, credential.accessToken, "page_impressions"),
+      engagement: await this.dailyInsight(
+        externalId,
+        credential.accessToken,
+        "page_post_engagements",
+      ),
+    };
+  }
+
+  /**
+   * The latest value of one day-level Insights metric for a Page or IG account.
+   * Insights answer `{ data: [{ values: [{ value }] }] }`; the last value is the
+   * most recent day. Absent (rather than zero) when the platform returns none.
+   */
+  private async dailyInsight(
+    nodeId: string,
+    accessToken: string,
+    metric: string,
+  ): Promise<number | undefined> {
+    const body = await this.graph<{ data?: Array<{ values?: Array<{ value?: number }> }> }>(
+      `${nodeId}/insights`,
+      { access_token: accessToken, metric, period: "day" },
+    );
+    const values = body.data?.[0]?.values;
+    return values?.[values.length - 1]?.value;
   }
 
   /** Trade any user token for a long-lived one, and learn who it belongs to. */
