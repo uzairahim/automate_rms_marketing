@@ -10,6 +10,7 @@ import {
   attachMedia,
   createPost,
   findPost,
+  listPostHistory,
   listTargets,
   replaceTargets,
   updatePostContent,
@@ -18,6 +19,11 @@ import {
   type Target,
 } from "../posts/posts.js";
 import { publishPost, manualRetryTarget } from "../posts/publish.js";
+import {
+  historyThumbnail,
+  memoizingCredentialOpener,
+  targetMetrics,
+} from "../posts/post-reads.js";
 import { findMedia, mediaPublicUrl } from "../media/media.js";
 
 /**
@@ -206,6 +212,31 @@ async function resolveCompose(
 }
 
 export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
+  // A Client's Post history (PRD story 46): everything it has published, newest
+  // first, each entry carrying a thumbnail fetched live from the platform's
+  // authenticated API using the stored post id (ADR 0003) — never persisted, and
+  // null when it cannot be fetched so the entry still renders text/status.
+  app.get("/api/posts", async (request, reply) => {
+    const ctx = await authenticateClientRequest(request, reply);
+    if (!ctx) return reply;
+
+    const { pool, publisher, tokenCipher } = app.deps;
+    const posts = await listPostHistory(pool, ctx.client.id);
+
+    // One memoized opener for the whole list: each platform's account credential
+    // is unsealed once, not once per row (ADR 0006).
+    const open = memoizingCredentialOpener(pool, tokenCipher, ctx.client.id);
+    const entries = await Promise.all(
+      posts.map(async (post) => {
+        const targets = await listTargets(pool, post.id);
+        const thumbnailUrl = await historyThumbnail(open, publisher, targets);
+        return { ...postView(post), thumbnailUrl, targets: targets.map(targetView) };
+      }),
+    );
+
+    return reply.code(200).send({ posts: entries });
+  });
+
   // Compose a Post: saved as a Draft, scheduled for later, or published
   // immediately (PRD stories 29–36) depending on the body's `draft`/`scheduledAt`.
   app.post<{ Body: ComposeBody }>("/api/posts", async (request, reply) => {
@@ -345,6 +376,37 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
     }
     const targets = await listTargets(pool, post.id);
     return reply.code(200).send({ post: postView(post), targets: targets.map(targetView) });
+  });
+
+  // A Post's live per-post metrics (PRD story 46): likes/comments/shares/views
+  // per platform, fetched fresh from the platform each time and never stored
+  // (CONTEXT.md `Metric Snapshot`). Kept off the pollable GET above so watching a
+  // Publishing Post settle stays a cheap DB read with no platform round-trips.
+  // Each Target also carries its permalink — the link to the live post.
+  app.get<{ Params: { id: string } }>("/api/posts/:id/metrics", async (request, reply) => {
+    const ctx = await authenticateClientRequest(request, reply);
+    if (!ctx) return reply;
+
+    const { pool, publisher, tokenCipher } = app.deps;
+    const post = await findPost(pool, ctx.client.id, request.params.id);
+    if (!post) {
+      return reply.code(404).send({ error: "post_not_found" });
+    }
+
+    const targets = await listTargets(pool, post.id);
+    const open = memoizingCredentialOpener(pool, tokenCipher, ctx.client.id);
+    const metrics = await Promise.all(
+      targets.map(async (target) => ({
+        platform: target.platform,
+        status: target.status,
+        permalink: target.permalink,
+        // Null when this Target has nothing readable (not published, account
+        // disconnected, or the platform refused) — never blanks the others.
+        metrics: await targetMetrics(open, publisher, target),
+      })),
+    );
+
+    return reply.code(200).send({ post: postView(post), targets: metrics });
   });
 
   // A User's manual retry of one failed Target (PRD story 43). Only meaningful

@@ -6,6 +6,8 @@ import {
   type InstagramAccount,
   type Platform,
   type PlatformCredential,
+  type PostMetrics,
+  type PostReadRequest,
   type PublishRequest,
   type PublishResult,
   type Publisher,
@@ -42,7 +44,19 @@ export class FakePublisher implements Publisher {
   /** Every full {@link RefreshRequest}, for asserting on what the job asked for. */
   readonly refreshRequests: RefreshRequest[] = [];
 
+  /** Every {@link fetchThumbnail} request, in call order (proves a live re-fetch). */
+  readonly thumbnailReads: PostReadRequest[] = [];
+
+  /** Every {@link fetchPostMetrics} request, in call order. */
+  readonly metricReads: PostReadRequest[] = [];
+
   private readonly scripts = new Map<Platform, () => PublishResult>();
+
+  /** Per-platform thumbnail outcome: a URL, `null` (none), or a thrown error. */
+  private readonly thumbnailScripts = new Map<Platform, () => string | null>();
+
+  /** Per-platform metrics outcome: numbers, or a thrown error. */
+  private readonly metricsScripts = new Map<Platform, () => PostMetrics>();
 
   /** What `pages_show_list` returns. Default: a single Page. */
   private pages: FacebookPage[] = [fakePage(DEFAULT_PAGE)];
@@ -69,6 +83,22 @@ export class FakePublisher implements Publisher {
     permalink: "https://example.test/p/fake-external-id",
   });
 
+  /**
+   * Default thumbnail for a published post nobody scripted: a per-post signed URL
+   * derived from the stored id, so two different posts get two different URLs (a
+   * test can tell them apart) and the value is plainly ephemeral, not persisted.
+   */
+  private defaultThumbnail: (request: PostReadRequest) => string | null = (request) =>
+    `https://cdn.example.test/thumb/${request.platform}/${request.externalId}.jpg`;
+
+  /** Default metrics for a published post nobody scripted. */
+  private defaultMetrics: () => PostMetrics = () => ({
+    likes: 10,
+    comments: 2,
+    shares: 1,
+    views: 100,
+  });
+
   /** Script a platform to succeed, optionally with a specific external id. */
   scriptSuccess(platform: Platform, externalId?: string, permalink?: string): this {
     this.scripts.set(platform, () => ({
@@ -88,6 +118,34 @@ export class FakePublisher implements Publisher {
   /** Requests recorded for a single platform. */
   sentTo(platform: Platform): PublishRequest[] {
     return this.sent.filter((r) => r.platform === platform);
+  }
+
+  /** Script the thumbnail a platform returns for a published post — a URL, or `null` for none. */
+  scriptThumbnail(platform: Platform, url: string | null): this {
+    this.thumbnailScripts.set(platform, () => url);
+    return this;
+  }
+
+  /** Script the platform to refuse a thumbnail read (rate limit, deleted media). */
+  scriptThumbnailFailure(platform: Platform, error: string): this {
+    this.thumbnailScripts.set(platform, () => {
+      throw new PublisherError(platform, error);
+    });
+    return this;
+  }
+
+  /** Script the per-post metrics a platform returns for a published post. */
+  scriptMetrics(platform: Platform, metrics: PostMetrics): this {
+    this.metricsScripts.set(platform, () => metrics);
+    return this;
+  }
+
+  /** Script the platform to refuse a metrics read. */
+  scriptMetricsFailure(platform: Platform, error: string): this {
+    this.metricsScripts.set(platform, () => {
+      throw new PublisherError(platform, error);
+    });
+    return this;
   }
 
   /**
@@ -158,7 +216,11 @@ export class FakePublisher implements Publisher {
     this.sent.length = 0;
     this.refreshed.length = 0;
     this.refreshRequests.length = 0;
+    this.thumbnailReads.length = 0;
+    this.metricReads.length = 0;
     this.scripts.clear();
+    this.thumbnailScripts.clear();
+    this.metricsScripts.clear();
     this.pages = [fakePage(DEFAULT_PAGE)];
     this.tikTokAccount = { id: "tiktok-open-id", displayName: "Test TikTok" };
     this.exchangeError = null;
@@ -220,6 +282,18 @@ export class FakePublisher implements Publisher {
       throw new PublisherError("tiktok", this.tikTokAccountError);
     }
     return { ...this.tikTokAccount };
+  }
+
+  async fetchThumbnail(request: PostReadRequest): Promise<string | null> {
+    this.thumbnailReads.push({ ...request });
+    const script = this.thumbnailScripts.get(request.platform);
+    return script ? script() : this.defaultThumbnail(request);
+  }
+
+  async fetchPostMetrics(request: PostReadRequest): Promise<PostMetrics> {
+    this.metricReads.push({ ...request });
+    const script = this.metricsScripts.get(request.platform) ?? this.defaultMetrics;
+    return script();
   }
 
   async refreshCredential(request: RefreshRequest): Promise<PlatformCredential> {

@@ -7,6 +7,8 @@ import {
   type InstagramAccount,
   type Platform,
   type PlatformCredential,
+  type PostMetrics,
+  type PostReadRequest,
   type PublishRequest,
   type PublishResult,
   type Publisher,
@@ -35,6 +37,7 @@ import {
 const AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize/";
 const TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/";
 const USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/";
+const VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/";
 
 /**
  * What we ask a creator for at login (docs/platform-app-setup.md §2).
@@ -60,6 +63,15 @@ interface TokenResponse {
 interface UserInfoResponse {
   data?: { user?: { open_id?: string; display_name?: string } };
   error?: { code?: string; message?: string };
+}
+
+/** One video row from `video/query` — the fields a thumbnail and metrics read from. */
+interface TikTokVideo {
+  cover_image_url?: string;
+  like_count?: number;
+  comment_count?: number;
+  share_count?: number;
+  view_count?: number;
 }
 
 export class TikTokPublisher implements Publisher {
@@ -155,6 +167,53 @@ export class TikTokPublisher implements Publisher {
       request.platform,
       "Publishing via the TikTok transport is not implemented yet.",
     );
+  }
+
+  async fetchThumbnail(request: PostReadRequest): Promise<string | null> {
+    this.assertTikTok(request.platform);
+    try {
+      const video = await this.queryVideo(request, "id,cover_image_url");
+      return video?.cover_image_url ?? null;
+    } catch {
+      // Best-effort, like Meta's: a removed video or a throttled read leaves the
+      // history entry rendering text/status rather than failing the whole list.
+      return null;
+    }
+  }
+
+  async fetchPostMetrics(request: PostReadRequest): Promise<PostMetrics> {
+    this.assertTikTok(request.platform);
+    const video = await this.queryVideo(
+      request,
+      "id,like_count,comment_count,share_count,view_count",
+    );
+    return {
+      likes: video?.like_count,
+      comments: video?.comment_count,
+      shares: video?.share_count,
+      views: video?.view_count,
+    };
+  }
+
+  /**
+   * One `video/query` for a single video id — the endpoint behind both a
+   * thumbnail (cover image) and per-post metrics. The requested `fields` decide
+   * which of the two the caller gets back.
+   */
+  private async queryVideo(
+    request: PostReadRequest,
+    fields: string,
+  ): Promise<TikTokVideo | undefined> {
+    const url = `${VIDEO_QUERY_URL}?${new URLSearchParams({ fields }).toString()}`;
+    const body = await this.call<{ data?: { videos?: TikTokVideo[] } }>(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${request.credential.accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ filters: { video_ids: [request.externalId] } }),
+    });
+    return body.data?.videos?.[0];
   }
 
   /**

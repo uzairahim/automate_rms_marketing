@@ -162,6 +162,37 @@ export interface InstagramAccount {
 }
 
 /**
+ * A read of one already-published Target: its platform, the account credential
+ * that authorizes the read, and the platform's durable post/media id we stored
+ * at publish time. The same shape drives both a history thumbnail and a Post's
+ * live per-post metrics — both are authenticated reads of one published post.
+ *
+ * The credential is the *Connected Account's* (the Page/TikTok token), not the
+ * post's — a post has no token. `externalId` is the Target's `external_id`.
+ */
+export interface PostReadRequest {
+  platform: Platform;
+  credential: PlatformCredential;
+  /** The platform's post/media id, stored per Target on a successful publish. */
+  externalId: string;
+}
+
+/**
+ * A published post's live engagement numbers (CONTEXT.md `Metric Snapshot`
+ * contrasts these per-post metrics, which are *never stored*, with the daily
+ * account-level snapshots that are). Every field is optional because platforms
+ * differ in what they expose — Facebook has no "views", a TikTok video has no
+ * "shares" surfaced the same way — and a field we cannot read is simply absent
+ * rather than a fabricated zero.
+ */
+export interface PostMetrics {
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  views?: number;
+}
+
+/**
  * The TikTok account a credential authorizes. Always exactly one: TikTok's OAuth
  * authorizes a single account, so unlike Facebook there is nothing to choose
  * between and no dead-end to guide out of.
@@ -241,4 +272,28 @@ export interface Publisher {
    * marks the Connected Account `token_expired` so the User can reconnect.
    */
   refreshCredential(request: RefreshRequest): Promise<PlatformCredential>;
+
+  /**
+   * The current thumbnail for a published post, fetched from the platform's
+   * authenticated API using the stored post/media id (ADR 0003). The URL is a
+   * temporary signed one the caller must treat as ephemeral — re-fetched on
+   * demand, never persisted.
+   *
+   * Returns `null` rather than throwing when the platform has no thumbnail to
+   * give *right now* — the media was deleted on the platform, the read was
+   * rate-limited, or the account was since disconnected — because a missing
+   * thumbnail is an ordinary state a history list must still render around
+   * (text/status), not an error worth failing the whole page over.
+   */
+  fetchThumbnail(request: PostReadRequest): Promise<string | null>;
+
+  /**
+   * A published post's live per-post metrics (likes/comments/shares/views),
+   * fetched fresh from the platform each time and never stored (CONTEXT.md
+   * `Metric Snapshot`). Shown on a Post's detail page.
+   *
+   * @throws {PublisherError} if the platform refuses the read — the caller shows
+   * that platform's metrics as unavailable without blanking the others.
+   */
+  fetchPostMetrics(request: PostReadRequest): Promise<PostMetrics>;
 }

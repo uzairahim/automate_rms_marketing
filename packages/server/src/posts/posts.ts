@@ -185,6 +185,24 @@ export async function createPost(
   return { post, targets };
 }
 
+/**
+ * A Client's Post history (PRD story 46): every Post it has actually sent, newest
+ * first. A `draft`/`scheduled` Post is deliberately excluded — history is what a
+ * User *published*, not what they are still composing or waiting to fire; the
+ * remaining statuses (`publishing`/`published`/`partially_published`/`failed`)
+ * are exactly the Posts that have left the composer and have a Target outcome to
+ * show. Scoped to the Client, like every other read here.
+ */
+export async function listPostHistory(pool: pg.Pool, clientId: string): Promise<Post[]> {
+  const { rows } = await pool.query<PostRow>(
+    `SELECT ${POST_COLUMNS} FROM posts
+     WHERE client_id = $1 AND status NOT IN ('draft', 'scheduled')
+     ORDER BY created_at DESC`,
+    [clientId],
+  );
+  return rows.map(postFromRow);
+}
+
 /** A Post scoped to a Client — never lets one Client read another's Post. */
 export async function findPost(
   pool: pg.Pool,

@@ -5,6 +5,8 @@ import {
   type InstagramAccount,
   type Platform,
   type PlatformCredential,
+  type PostMetrics,
+  type PostReadRequest,
   type PublishRequest,
   type PublishResult,
   type Publisher,
@@ -59,6 +61,14 @@ export class RoutingPublisher implements Publisher {
 
   fetchTikTokAccount(credential: PlatformCredential): Promise<TikTokAccount> {
     return this.for("tiktok").fetchTikTokAccount(credential);
+  }
+
+  fetchThumbnail(request: PostReadRequest): Promise<string | null> {
+    return this.for(request.platform).fetchThumbnail(request);
+  }
+
+  fetchPostMetrics(request: PostReadRequest): Promise<PostMetrics> {
+    return this.for(request.platform).fetchPostMetrics(request);
   }
 
   private for(platform: Platform): Publisher {

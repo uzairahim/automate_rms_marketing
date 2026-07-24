@@ -7,6 +7,8 @@ import {
   type InstagramAccount,
   type Platform,
   type PlatformCredential,
+  type PostMetrics,
+  type PostReadRequest,
   type PublishRequest,
   type PublishResult,
   type Publisher,
@@ -223,6 +225,56 @@ export class MetaPublisher implements Publisher {
       request.platform,
       "Publishing via the Meta transport is not implemented yet.",
     );
+  }
+
+  async fetchThumbnail(request: PostReadRequest): Promise<string | null> {
+    this.assertMetaPlatform(request.platform);
+    try {
+      if (request.platform === "instagram") {
+        // An IG media exposes a `thumbnail_url` for video and `media_url` for a
+        // still image — whichever is present is the thumbnail.
+        const media = await this.graph<{ thumbnail_url?: string; media_url?: string }>(
+          request.externalId,
+          { access_token: request.credential.accessToken, fields: "thumbnail_url,media_url" },
+        );
+        return media.thumbnail_url ?? media.media_url ?? null;
+      }
+      const post = await this.graph<{ full_picture?: string }>(request.externalId, {
+        access_token: request.credential.accessToken,
+        fields: "full_picture",
+      });
+      return post.full_picture ?? null;
+    } catch {
+      // A thumbnail is best-effort (ADR 0003): a deleted media or a throttled
+      // read must leave the history list rendering text/status, not fail it.
+      return null;
+    }
+  }
+
+  async fetchPostMetrics(request: PostReadRequest): Promise<PostMetrics> {
+    this.assertMetaPlatform(request.platform);
+    if (request.platform === "instagram") {
+      const media = await this.graph<{ like_count?: number; comments_count?: number }>(
+        request.externalId,
+        { access_token: request.credential.accessToken, fields: "like_count,comments_count" },
+      );
+      return { likes: media.like_count, comments: media.comments_count };
+    }
+    // A Facebook Page post: the engagement counts hang off summary edges, and
+    // `shares.count` is its own field. Absent counts stay absent (never a fake 0).
+    const post = await this.graph<{
+      likes?: { summary?: { total_count?: number } };
+      comments?: { summary?: { total_count?: number } };
+      shares?: { count?: number };
+    }>(request.externalId, {
+      access_token: request.credential.accessToken,
+      fields: "likes.summary(true),comments.summary(true),shares",
+    });
+    return {
+      likes: post.likes?.summary?.total_count,
+      comments: post.comments?.summary?.total_count,
+      shares: post.shares?.count,
+    };
   }
 
   /** Trade any user token for a long-lived one, and learn who it belongs to. */
