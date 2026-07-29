@@ -1,5 +1,6 @@
 import pg from "pg";
 import { migrations } from "./migrations.js";
+import { isMainModule } from "../cli.js";
 
 /**
  * Apply all pending migrations against the given pool. Idempotent: already-applied
@@ -46,7 +47,7 @@ export async function runMigrations(pool: pg.Pool): Promise<void> {
 }
 
 // CLI entrypoint: `npm -w @smma/server run migrate`.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   const { waitForPostgres } = await import("./pool.js");
   await import("../load-env.js");
   const databaseUrl = process.env.DATABASE_URL;

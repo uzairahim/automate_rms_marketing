@@ -13,6 +13,7 @@
     "dev:worker": "npm -w @smma/server run dev:worker",
     "dev:web": "npm -w @smma/web run dev",
     "migrate": "npm -w @smma/server run migrate",
+    "seed": "npm -w @smma/server run seed",
     "build": "npm -w @smma/server run build && npm -w @smma/web run build",
     "typecheck": "npm -w @smma/server run typecheck && npm -w @smma/web run typecheck",
     "test": "npm -w @smma/server run test"
