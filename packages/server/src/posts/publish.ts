@@ -1,7 +1,8 @@
 import type pg from "pg";
 import type { Clock } from "../core/clock.js";
 import type { Publisher } from "../core/publisher.js";
-import { markTokenExpiredForPlatform } from "../connections/accounts.js";
+import type { SecretCipher } from "../core/crypto.js";
+import { markTokenExpiredForPlatform, openAccountCredential } from "../connections/accounts.js";
 import { findMediaForPost, settleMediaForPost } from "../media/media.js";
 import {
   findTarget,
@@ -43,14 +44,40 @@ export async function attemptPublish(
   pool: pg.Pool,
   clock: Clock,
   publisher: Publisher,
+  cipher: SecretCipher,
   post: Post,
   target: Target,
   options: { auto: boolean },
 ): Promise<Target> {
+  // Publishing acts *as* the Connected Account, so its credential is opened here
+  // and handed to the transport — which has no database of its own and no other
+  // way to reach a token (ADR 0006).
+  const account = await openAccountCredential(pool, cipher, post.clientId, target.platform);
+
+  // Connected at compose time, gone by publish time: a Scheduled Post whose
+  // account was disconnected or expired while it waited. Terminal on the spot —
+  // there is no credential for a retry to use, so burning the auto-retries (and,
+  // for a Scheduled Post, the grace window) would only delay the same answer.
+  // Not routed through the `auth` path below, because that flips the account to
+  // `token_expired`, and a link the User deliberately dropped must stay dropped.
+  if (!account) {
+    return recordTargetOutcome(pool, clock, target.id, {
+      status: "failed",
+      externalId: null,
+      permalink: null,
+      error: `${target.platform} is no longer connected — reconnect it and retry.`,
+      retryCount: target.retryCount,
+      nextRetryAt: null,
+    });
+  }
+
   const result = await publisher.publish({
     platform: target.platform,
     text: post.text,
     mediaUrl: post.media?.url,
+    mediaType: post.media?.type,
+    credential: account.credential,
+    externalId: account.externalId,
   });
 
   if (result.ok) {
@@ -134,12 +161,13 @@ export async function publishPost(
   pool: pg.Pool,
   clock: Clock,
   publisher: Publisher,
+  cipher: SecretCipher,
   mediaDir: string,
   post: Post,
   targets: readonly Target[],
 ): Promise<Target[]> {
   for (const target of targets) {
-    await attemptPublish(pool, clock, publisher, post, target, { auto: true });
+    await attemptPublish(pool, clock, publisher, cipher, post, target, { auto: true });
   }
   return recomputePostStatus(pool, clock, mediaDir, post.id);
 }
@@ -164,6 +192,7 @@ export async function manualRetryTarget(
   pool: pg.Pool,
   clock: Clock,
   publisher: Publisher,
+  cipher: SecretCipher,
   mediaDir: string,
   post: Post,
   platform: Target["platform"],
@@ -178,7 +207,7 @@ export async function manualRetryTarget(
     }
   }
 
-  await attemptPublish(pool, clock, publisher, post, target, { auto: false });
+  await attemptPublish(pool, clock, publisher, cipher, post, target, { auto: false });
   const targets = await recomputePostStatus(pool, clock, mediaDir, post.id);
   const updated = targets.find((t) => t.platform === platform)!;
   return { ok: true, target: updated, targets };

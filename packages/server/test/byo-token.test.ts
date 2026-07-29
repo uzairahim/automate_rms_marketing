@@ -427,7 +427,7 @@ describe("Bring-your-own-token fallback (Meta)", () => {
       // The Post comes due, well within the 60-minute grace window, and fires.
       clock.set(new Date(NOW.getTime() + 31 * 60_000));
       publisher.scriptAuthFailure("facebook", "Session has expired.");
-      const outcome = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
       expect(outcome).toMatchObject({ due: 1, fired: 1 });
 
       // The Target is Failed on this first attempt — not left `pending` to burn

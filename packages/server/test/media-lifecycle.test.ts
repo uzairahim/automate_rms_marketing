@@ -230,9 +230,9 @@ describe("Media lifecycle", () => {
     // Exhaust TikTok's two auto-retries so the roll-up settles to Partially
     // Published — only then is the 24h purge window scheduled.
     clock.advance(60_000);
-    await retryDueTargets(db.pool, clock, publisher, mediaDir);
+    await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
     clock.advance(60_000);
-    const outcome = await retryDueTargets(db.pool, clock, publisher, mediaDir);
+    const outcome = await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
     expect(outcome.failed).toBe(1);
 
     const final = await app.inject({
@@ -266,9 +266,9 @@ describe("Media lifecycle", () => {
     const postId = composeRes.json().post.id as string;
 
     clock.advance(60_000);
-    await retryDueTargets(db.pool, clock, publisher, mediaDir);
+    await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
     clock.advance(60_000);
-    await retryDueTargets(db.pool, clock, publisher, mediaDir);
+    await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
     clock.advance(ONE_DAY_MS);
     expect(await purgeDueMedia(db.pool, clock, mediaDir)).toBe(1);
@@ -297,9 +297,9 @@ describe("Media lifecycle", () => {
     const postId = composeRes.json().post.id as string;
 
     clock.advance(60_000);
-    await retryDueTargets(db.pool, clock, publisher, mediaDir);
+    await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
     clock.advance(60_000);
-    await retryDueTargets(db.pool, clock, publisher, mediaDir);
+    await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
     clock.advance(ONE_DAY_MS);
     await purgeDueMedia(db.pool, clock, mediaDir);
 

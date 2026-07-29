@@ -52,6 +52,7 @@ async function main(): Promise<void> {
     pool,
     clock,
     publisher,
+    tokenCipher: cipher,
     mediaDir: config.mediaDir,
     connection,
   });
@@ -69,6 +70,7 @@ async function main(): Promise<void> {
     pool,
     clock,
     publisher,
+    tokenCipher: cipher,
     mediaDir: config.mediaDir,
     connection,
   });

@@ -284,7 +284,7 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
     const ctx = await authenticateClientRequest(request, reply);
     if (!ctx) return reply;
 
-    const { pool, clock, publisher, mediaDir, mediaBaseUrl } = app.deps;
+    const { pool, clock, publisher, tokenCipher, mediaDir, mediaBaseUrl } = app.deps;
     const resolution = await resolveCompose(
       pool,
       clock,
@@ -313,7 +313,7 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
     // finds it due (PRD stories 35–36).
     const finalTargets =
       resolution.status === "publishing"
-        ? await publishPost(pool, clock, publisher, mediaDir, post, targets)
+        ? await publishPost(pool, clock, publisher, tokenCipher, mediaDir, post, targets)
         : targets;
     const final = await findPost(pool, ctx.client.id, post.id);
 
@@ -421,7 +421,7 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
     const ctx = await authenticateClientRequest(request, reply);
     if (!ctx) return reply;
 
-    const { pool, clock, publisher, mediaDir, mediaBaseUrl } = app.deps;
+    const { pool, clock, publisher, tokenCipher, mediaDir, mediaBaseUrl } = app.deps;
     const post = await findPost(pool, ctx.client.id, request.params.id);
     if (!post) {
       return reply.code(404).send({ error: "post_not_found" });
@@ -455,7 +455,7 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
 
     // No content write ahead of the fan-out: nothing about the Post is changing,
     // and publishPost's roll-up is what sets its status and clears `scheduled_at`.
-    const settled = await publishPost(pool, clock, publisher, mediaDir, post, targets);
+    const settled = await publishPost(pool, clock, publisher, tokenCipher, mediaDir, post, targets);
     const final = await findPost(pool, ctx.client.id, post.id);
 
     return reply
@@ -522,13 +522,21 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: "unknown_platform" });
       }
 
-      const { pool, clock, publisher, mediaDir } = app.deps;
+      const { pool, clock, publisher, tokenCipher, mediaDir } = app.deps;
       const post = await findPost(pool, ctx.client.id, request.params.id);
       if (!post) {
         return reply.code(404).send({ error: "post_not_found" });
       }
 
-      const result = await manualRetryTarget(pool, clock, publisher, mediaDir, post, platform);
+      const result = await manualRetryTarget(
+        pool,
+        clock,
+        publisher,
+        tokenCipher,
+        mediaDir,
+        post,
+        platform,
+      );
       if (!result.ok) {
         if (result.reason === "media_purged") {
           return reply.code(409).send({

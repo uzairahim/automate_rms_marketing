@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { Clock } from "../core/clock.js";
 import type { Publisher } from "../core/publisher.js";
+import type { SecretCipher } from "../core/crypto.js";
 import { recomputePostStatus, publishPost } from "./publish.js";
 import { findDuePosts, listTargets, recordTargetOutcome } from "./posts.js";
 
@@ -52,6 +53,7 @@ export async function publishDuePosts(
   pool: pg.Pool,
   clock: Clock,
   publisher: Publisher,
+  cipher: SecretCipher,
   mediaDir: string,
 ): Promise<SchedulerOutcome> {
   const now = clock.now();
@@ -68,7 +70,7 @@ export async function publishDuePosts(
     }
 
     const targets = await listTargets(pool, post.id);
-    await publishPost(pool, clock, publisher, mediaDir, post, targets);
+    await publishPost(pool, clock, publisher, cipher, mediaDir, post, targets);
     outcome.fired += 1;
   }
 

@@ -315,7 +315,7 @@ describe("Scheduling + grace window + drafts", () => {
       // Advance well past the original fire time and run the tick — it must
       // never publish a cancelled (now Draft) Post.
       clock.advance(2 * 60 * 60 * 1000);
-      const outcome = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
       expect(outcome).toMatchObject({ due: 0, fired: 0, missed: 0 });
       expect(publisher.sent).toHaveLength(0);
 
@@ -348,7 +348,7 @@ describe("Scheduling + grace window + drafts", () => {
       await compose(auth, { text: "hi", platforms: ["facebook"], scheduledAt: future(60 * 60 * 1000) });
 
       clock.advance(30 * 60 * 1000); // still 30 minutes early
-      const outcome = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
       expect(outcome).toEqual({ due: 0, fired: 0, missed: 0 });
       expect(publisher.sent).toHaveLength(0);
@@ -370,7 +370,7 @@ describe("Scheduling + grace window + drafts", () => {
       const postId = composeRes.json().post.id as string;
 
       clock.advance(15 * 60 * 1000);
-      const outcome = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
       expect(outcome).toEqual({ due: 1, fired: 1, missed: 0 });
 
       const final = await getPost(auth, postId);
@@ -397,7 +397,7 @@ describe("Scheduling + grace window + drafts", () => {
       // The worker was "down" well past the fire time, but recovers inside
       // the grace window (< 60 minutes late).
       clock.advance(5 * 60 * 1000 + GRACE_WINDOW_MS - 60_000);
-      const outcome = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
       expect(outcome).toEqual({ due: 1, fired: 1, missed: 0 });
       const final = await getPost(auth, postId);
@@ -418,7 +418,7 @@ describe("Scheduling + grace window + drafts", () => {
       // "More than 60 minutes late" is Failed — exactly 60 minutes is not yet
       // "more than", so it must still fire.
       clock.advance(5 * 60 * 1000 + GRACE_WINDOW_MS);
-      const outcome = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
       expect(outcome).toEqual({ due: 1, fired: 1, missed: 0 });
       const final = await getPost(auth, postId);
@@ -437,7 +437,7 @@ describe("Scheduling + grace window + drafts", () => {
       const postId = composeRes.json().post.id as string;
 
       clock.advance(5 * 60 * 1000 + GRACE_WINDOW_MS + 60_000); // 1 minute past grace
-      const outcome = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
       expect(outcome).toEqual({ due: 1, fired: 0, missed: 1 });
       expect(publisher.sent).toHaveLength(0); // never attempted — no embarrassing late post
@@ -457,12 +457,45 @@ describe("Scheduling + grace window + drafts", () => {
       await compose(auth, { text: "hi", platforms: ["facebook"], scheduledAt: future(60_000) });
 
       clock.advance(60_000);
-      const first = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const first = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
       expect(first).toEqual({ due: 1, fired: 1, missed: 0 });
 
       clock.advance(60_000);
-      const second = await publishDuePosts(db.pool, clock, publisher, mediaDir);
+      const second = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
       expect(second).toEqual({ due: 0, fired: 0, missed: 0 });
+    });
+
+    it("fails a due Post whose account was disconnected while it waited", async () => {
+      const { auth } = await client();
+      await connectPlatforms(auth, ["facebook"]);
+      publisher.scriptSuccess("facebook", "never-sent");
+      const composeRes = await compose(auth, {
+        text: "hi",
+        platforms: ["facebook"],
+        scheduledAt: future(60 * 60 * 1000),
+      });
+      const postId = composeRes.json().post.id as string;
+
+      // Connected when it was scheduled, unlinked before it fired. Compose's gate
+      // ran an hour ago and cannot help here — the scheduler is what finds this.
+      await app.inject({ method: "DELETE", url: "/api/connections/facebook", headers: auth });
+
+      clock.advance(60 * 60 * 1000);
+      const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
+
+      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0 });
+      // Never attempted: there is no credential to attempt it with, so nothing
+      // reached the Publisher at all.
+      expect(publisher.sent).toHaveLength(0);
+
+      const final = await getPost(auth, postId);
+      expect(final.json().post.status).toBe("failed");
+      const targets = final.json().targets as Array<{ status: string; error: string; retryCount: number }>;
+      expect(targets[0]).toMatchObject({ status: "failed" });
+      expect(targets[0]!.error).toMatch(/no longer connected/i);
+      // Terminal on the first look — auto-retries would only re-discover the
+      // same missing credential a minute later.
+      expect(targets[0]!.retryCount).toBe(0);
     });
   });
 

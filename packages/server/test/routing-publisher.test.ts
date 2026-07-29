@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { RoutingPublisher } from "../src/platforms/routing-publisher.js";
 import type { Platform, Publisher } from "../src/core/publisher.js";
+import { publishRequest } from "./helpers/publish.js";
 
 /**
  * The Publisher that stands in front of the per-platform transports (ADR 0002).
@@ -26,7 +27,7 @@ describe("RoutingPublisher", () => {
   it("sends each platform's publish to that platform's transport", async () => {
     const { fake, router } = transports();
 
-    await router.publish({ platform: "tiktok", text: "vid" });
+    await router.publish(publishRequest("tiktok", { text: "vid" }));
 
     expect(fake.tiktok.sent).toHaveLength(1);
     expect(fake.facebook.sent).toHaveLength(0);
@@ -91,8 +92,8 @@ describe("RoutingPublisher", () => {
     const tiktok = new FakePublisher();
     const router = new RoutingPublisher({ facebook: meta, instagram: meta, tiktok });
 
-    await router.publish({ platform: "facebook", text: "a" });
-    await router.publish({ platform: "instagram", text: "b" });
+    await router.publish(publishRequest("facebook", { text: "a" }));
+    await router.publish(publishRequest("instagram", { text: "b" }));
 
     expect(meta.sent.map((request) => request.platform)).toEqual(["facebook", "instagram"]);
     expect(tiktok.sent).toHaveLength(0);

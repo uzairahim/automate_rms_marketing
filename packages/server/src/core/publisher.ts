@@ -36,6 +36,28 @@ export interface PublishRequest {
   text: string;
   /** Public HTTPS URL of the attached Media, if any. */
   mediaUrl?: string;
+  /**
+   * Whether `mediaUrl` is an image or a video. Present whenever `mediaUrl` is.
+   *
+   * Carried rather than inferred because it cannot be inferred: a Media URL is
+   * `{base}/api/media/{uuid}` with no extension, and the platforms need to be
+   * told which they are getting — Facebook posts to a different edge for each,
+   * and Instagram takes `image_url` or `video_url` on the container.
+   */
+  mediaType?: "image" | "video";
+  /**
+   * The Connected Account's credential — what authorizes this post. The same
+   * shape a {@link PostReadRequest} carries, and for the same reason: a transport
+   * has no database and no way to reach a token itself (ADR 0006 keeps
+   * `openAccountCredential` the sole read path).
+   */
+  credential: PlatformCredential;
+  /**
+   * The destination's own id on the platform: the Facebook Page id, the
+   * Instagram Business account id, or the TikTok `open_id`. Publishing is always
+   * an act *of* a destination, so this is what the request is addressed to.
+   */
+  externalId: string;
 }
 
 /**

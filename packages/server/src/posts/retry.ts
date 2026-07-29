@@ -1,6 +1,7 @@
 import type pg from "pg";
 import type { Clock } from "../core/clock.js";
 import type { Publisher } from "../core/publisher.js";
+import type { SecretCipher } from "../core/crypto.js";
 import { attemptPublish, recomputePostStatus } from "./publish.js";
 import { findDueTargets, findPost, type Post } from "./posts.js";
 
@@ -35,6 +36,7 @@ export async function retryDueTargets(
   pool: pg.Pool,
   clock: Clock,
   publisher: Publisher,
+  cipher: SecretCipher,
   mediaDir: string,
 ): Promise<RetryOutcome> {
   const due = await findDueTargets(pool, clock.now());
@@ -52,7 +54,9 @@ export async function retryDueTargets(
     if (!post) continue; // A due Target with no Post left (FK cascade) has nothing to retry.
 
     outcome.attempted += 1;
-    const updated = await attemptPublish(pool, clock, publisher, post, target, { auto: true });
+    const updated = await attemptPublish(pool, clock, publisher, cipher, post, target, {
+      auto: true,
+    });
     if (updated.status === "published") outcome.published += 1;
     else if (updated.status === "failed") outcome.failed += 1;
     affectedPosts.add(target.postId);

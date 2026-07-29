@@ -35,7 +35,10 @@ import {
  * is why it is kept as thin as it is — the interesting decisions live behind the
  * seam, in code that tests can reach.
  *
- * Publishing arrives with Slice 8; Slices 6–7 need the connection lifecycle.
+ * Publishing here needs `MEDIA_BASE_URL` to be an origin Meta itself can reach:
+ * every media path hands Meta a *URL to fetch*, never bytes, and Instagram has
+ * no upload endpoint at all. A localhost value silently produces a Page post
+ * with no image and an Instagram container that never leaves ERROR.
  */
 
 const GRAPH_VERSION = "v21.0";
@@ -70,6 +73,23 @@ const FACEBOOK_SCOPES = [
  * Pages a person manages.
  */
 const PAGE_FIELDS = "id,name,access_token,instagram_business_account{id,username}";
+
+/**
+ * How long to wait on an Instagram media container before giving up.
+ *
+ * An image container is ready on the first check; a video has to be transcoded
+ * by Meta first, and publishing before it reports `FINISHED` is refused. Bounded
+ * at roughly two minutes because this runs inside a publish attempt — a
+ * container still processing after that is better reported as "retry shortly"
+ * than held open, and the Target's own retry will pick it up.
+ */
+const IG_CONTAINER_POLL_INTERVAL_MS = 3_000;
+const IG_CONTAINER_MAX_POLLS = 40;
+
+/** Wait, for the Instagram container poll. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** Meta's error envelope. */
 interface GraphError {
@@ -239,13 +259,165 @@ export class MetaPublisher implements Publisher {
     return page.credential;
   }
 
+  /**
+   * Publish one Target to a Facebook Page or an Instagram Business account.
+   *
+   * Returns a {@link PublishResult} rather than throwing, because a platform
+   * refusal is an *outcome* here, not an exception: the retry state machine
+   * reads `ok: false` and decides whether to try again, and `reason: "auth"` is
+   * what flips the Connected Account to `token_expired`. A throw would escape
+   * the fan-out and 500 the whole compose, taking the other platforms' perfectly
+   * good results with it.
+   */
   async publish(request: PublishRequest): Promise<PublishResult> {
-    // Publishing lands in Slice 8. Failing loudly beats a silent no-op that
-    // would look like a Post that published and vanished.
+    this.assertMetaPlatform(request.platform);
+    try {
+      return request.platform === "instagram"
+        ? await this.publishToInstagram(request)
+        : await this.publishToFacebook(request);
+    } catch (err) {
+      if (err instanceof PublisherError) {
+        return { ok: false, error: err.message, reason: err.reason };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * A Facebook Page post. Three different edges, because Meta models them as
+   * three different things — a link-less status, a photo, and a video are not
+   * one endpoint with a flag.
+   *
+   * What we keep as the Target's `externalId` is the *post* id wherever Meta
+   * offers one (`/photos` returns both), since that is the node the history
+   * thumbnail and per-post metrics later read from.
+   */
+  private async publishToFacebook(request: PublishRequest): Promise<PublishResult> {
+    const { text, mediaUrl, mediaType, credential, externalId: pageId } = request;
+    const accessToken = credential.accessToken;
+
+    let created: { id: string; post_id?: string };
+    if (!mediaUrl) {
+      created = await this.graphPost("facebook", `${pageId}/feed`, {
+        access_token: accessToken,
+        message: text,
+      });
+    } else if (mediaType === "video") {
+      // `file_url` makes Meta fetch the video from us, which is why MEDIA_BASE_URL
+      // has to be publicly reachable — there is no raw upload on this path.
+      created = await this.graphPost("facebook", `${pageId}/videos`, {
+        access_token: accessToken,
+        file_url: mediaUrl,
+        description: text,
+      });
+    } else {
+      created = await this.graphPost("facebook", `${pageId}/photos`, {
+        access_token: accessToken,
+        url: mediaUrl,
+        caption: text,
+        published: "true",
+      });
+    }
+
+    const postId = created.post_id ?? created.id;
+    return {
+      ok: true,
+      externalId: postId,
+      permalink: `https://www.facebook.com/${postId}`,
+    };
+  }
+
+  /**
+   * An Instagram post, which is always two calls and often a wait in between:
+   * create a media *container*, then publish it. Meta has no single-shot
+   * endpoint, and for video the container is not publishable until Meta has
+   * finished transcoding — publishing early is refused.
+   *
+   * Instagram cannot post text alone (our compose gate already enforces this),
+   * and takes only a public URL — never an upload.
+   */
+  private async publishToInstagram(request: PublishRequest): Promise<PublishResult> {
+    const { text, mediaUrl, mediaType, credential, externalId: igUserId } = request;
+    const accessToken = credential.accessToken;
+
+    if (!mediaUrl) {
+      // Defensive: compose refuses this long before here. Reported as a refusal
+      // rather than thrown so it reads as this Target's outcome.
+      return { ok: false, error: "Instagram requires an image or video." };
+    }
+
+    const container = await this.graphPost("instagram", `${igUserId}/media`, {
+      access_token: accessToken,
+      caption: text,
+      // A feed video is published as a Reel — Meta retired the plain VIDEO
+      // container type for this edge.
+      ...(mediaType === "video"
+        ? { media_type: "REELS", video_url: mediaUrl }
+        : { image_url: mediaUrl }),
+    });
+
+    await this.awaitContainerReady(container.id, accessToken);
+
+    const published = await this.graphPost("instagram", `${igUserId}/media_publish`, {
+      access_token: accessToken,
+      creation_id: container.id,
+    });
+
+    return {
+      ok: true,
+      externalId: published.id,
+      // Asked for rather than constructed: an IG media's canonical URL uses a
+      // shortcode we are not given, so there is nothing to build one from.
+      permalink: await this.instagramPermalink(published.id, accessToken),
+    };
+  }
+
+  /**
+   * Wait for an Instagram media container to finish processing.
+   *
+   * An image container is `FINISHED` on the first check; a video may take tens of
+   * seconds. Polled rather than awaited on a webhook because Meta offers no
+   * callback for this, and bounded so a container stuck `IN_PROGRESS` fails the
+   * Target instead of holding a request open indefinitely.
+   */
+  private async awaitContainerReady(containerId: string, accessToken: string): Promise<void> {
+    for (let attempt = 0; attempt < IG_CONTAINER_MAX_POLLS; attempt += 1) {
+      const container = await this.graph<{ status_code?: string; status?: string }>(containerId, {
+        access_token: accessToken,
+        fields: "status_code,status",
+      });
+
+      if (container.status_code === "FINISHED") return;
+      if (container.status_code === "ERROR" || container.status_code === "EXPIRED") {
+        throw new PublisherError(
+          "instagram",
+          // `status` carries Meta's own explanation of what it disliked about
+          // the media — far more useful than "ERROR".
+          container.status ?? "Instagram could not process this media.",
+        );
+      }
+      await delay(IG_CONTAINER_POLL_INTERVAL_MS);
+    }
+
     throw new PublisherError(
-      request.platform,
-      "Publishing via the Meta transport is not implemented yet.",
+      "instagram",
+      "Instagram is still processing this media. It was not published — retry in a few minutes.",
     );
+  }
+
+  /** An IG media's canonical permalink, or undefined if Meta will not give one. */
+  private async instagramPermalink(mediaId: string, accessToken: string): Promise<string | undefined> {
+    try {
+      const media = await this.graph<{ permalink?: string }>(mediaId, {
+        access_token: accessToken,
+        fields: "permalink",
+      });
+      return media.permalink;
+    } catch {
+      // The post is already live; a missing link must not turn that into a
+      // failure the retry machinery would try to publish a second time.
+      return undefined;
+    }
   }
 
   async fetchThumbnail(request: PostReadRequest): Promise<string | null> {
@@ -395,12 +567,42 @@ export class MetaPublisher implements Publisher {
    */
   private async graph<T>(path: string, params: Record<string, string>): Promise<T> {
     const url = `${GRAPH_URL}/${path}?${new URLSearchParams(params).toString()}`;
+    return this.request<T>("facebook", url, {});
+  }
 
+  /**
+   * One POST against the Graph API — every write this transport makes, which is
+   * to say every publish.
+   *
+   * Parameters go in the request body, form-encoded, rather than on the query
+   * string: a caption is arbitrary user text of arbitrary length, and a URL is
+   * the wrong place for it. Attributed to the calling platform so an Instagram
+   * refusal is reported as Instagram's, even though both platforms speak to the
+   * same host through the same app.
+   */
+  private async graphPost(
+    platform: Platform,
+    path: string,
+    params: Record<string, string>,
+  ): Promise<{ id: string; post_id?: string }> {
+    return this.request<{ id: string; post_id?: string }>(platform, `${GRAPH_URL}/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params).toString(),
+    });
+  }
+
+  /**
+   * The one place a Graph call is made and a Meta refusal is turned into a
+   * {@link PublisherError} carrying Meta's own message — so a User is told what
+   * Facebook actually said rather than "something went wrong".
+   */
+  private async request<T>(platform: Platform, url: string, init: RequestInit): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(url);
+      response = await fetch(url, init);
     } catch (err) {
-      throw new PublisherError("facebook", `Could not reach Facebook: ${String(err)}`);
+      throw new PublisherError(platform, `Could not reach Facebook: ${String(err)}`);
     }
 
     const text = await response.text();
@@ -408,7 +610,7 @@ export class MetaPublisher implements Publisher {
     try {
       body = JSON.parse(text);
     } catch {
-      throw new PublisherError("facebook", `Unexpected response from Facebook: ${text}`);
+      throw new PublisherError(platform, `Unexpected response from Facebook: ${text}`);
     }
 
     if (!response.ok) {
@@ -419,7 +621,7 @@ export class MetaPublisher implements Publisher {
       // credential that will never recover (ADR 0008, PRD #1). See
       // {@link graphFailureReason} for why this is code 190 only, not every
       // OAuthException.
-      throw new PublisherError("facebook", message, graphFailureReason(graphError));
+      throw new PublisherError(platform, message, graphFailureReason(graphError));
     }
     return body as T;
   }

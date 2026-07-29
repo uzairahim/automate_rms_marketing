@@ -348,9 +348,9 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       // Once TikTok's auto-retries are exhausted, the roll-up settles to
       // Partially Published — Facebook's success was never rolled back.
       clock.advance(60_000);
-      await retryDueTargets(db.pool, clock, publisher, mediaDir);
+      await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
       clock.advance(60_000);
-      await retryDueTargets(db.pool, clock, publisher, mediaDir);
+      await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
       const final = await app.inject({ method: "GET", url: `/api/posts/${postId}`, headers: auth });
       expect(final.json().post.status).toBe("partially_published");
@@ -390,7 +390,7 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       publisher.scriptSuccess("facebook", "fb-recovered");
       clock.advance(60_000);
 
-      const outcome = await retryDueTargets(db.pool, clock, publisher, mediaDir);
+      const outcome = await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
       expect(outcome).toMatchObject({ attempted: 1, published: 1, failed: 0 });
 
       const res = await app.inject({ method: "GET", url: `/api/posts/${postId}`, headers: auth });
@@ -407,7 +407,7 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       const postId = composeRes.json().post.id as string;
 
       clock.advance(60_000);
-      expect(await retryDueTargets(db.pool, clock, publisher, mediaDir)).toMatchObject({
+      expect(await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir)).toMatchObject({
         attempted: 1,
         failed: 0,
       });
@@ -415,7 +415,7 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       expect(target).toMatchObject({ status: "pending", retryCount: 2 });
 
       clock.advance(60_000);
-      expect(await retryDueTargets(db.pool, clock, publisher, mediaDir)).toMatchObject({
+      expect(await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir)).toMatchObject({
         attempted: 1,
         failed: 1,
       });
@@ -443,9 +443,9 @@ describe("Compose + validate-and-gate + immediate publish", () => {
       const postId = composeRes.json().post.id as string;
 
       clock.advance(60_000);
-      await retryDueTargets(db.pool, clock, publisher, mediaDir);
+      await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
       clock.advance(60_000);
-      await retryDueTargets(db.pool, clock, publisher, mediaDir);
+      await retryDueTargets(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
       publisher.scriptSuccess("facebook", "fb-manual-recovery");
       const res = await app.inject({
