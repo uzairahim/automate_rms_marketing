@@ -203,6 +203,28 @@ export async function listPostHistory(pool: pg.Pool, clientId: string): Promise<
   return rows.map(postFromRow);
 }
 
+/**
+ * The Posts a User is still working on: every Draft and Scheduled Post this
+ * Client holds — the exact complement of {@link listPostHistory}, which shows
+ * only what has already left the composer.
+ *
+ * Without this a Draft is write-only. It has no Target outcome, so history will
+ * never list it, and its id is the only way back to it — which the composer has
+ * no way to have kept.
+ *
+ * Soonest-due first, so a Scheduled Post about to fire sits at the top; Drafts
+ * have no fire time at all and follow, most recently touched first.
+ */
+export async function listPendingPosts(pool: pg.Pool, clientId: string): Promise<Post[]> {
+  const { rows } = await pool.query<PostRow>(
+    `SELECT ${POST_COLUMNS} FROM posts
+     WHERE client_id = $1 AND status IN ('draft', 'scheduled')
+     ORDER BY scheduled_at ASC NULLS LAST, updated_at DESC`,
+    [clientId],
+  );
+  return rows.map(postFromRow);
+}
+
 /** A Post scoped to a Client — never lets one Client read another's Post. */
 export async function findPost(
   pool: pg.Pool,

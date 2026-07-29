@@ -10,6 +10,7 @@ import {
   attachMedia,
   createPost,
   findPost,
+  listPendingPosts,
   listPostHistory,
   listTargets,
   replaceTargets,
@@ -252,6 +253,31 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(200).send({ posts: entries });
   });
 
+  // Everything still in the composer: this Client's Drafts and Scheduled Posts.
+  //
+  // A separate route rather than a filter on the history list above, because the
+  // two answer different questions and cost different things: a history row
+  // fetches a live thumbnail per Post (an authenticated platform round-trip),
+  // while nothing here has published yet and so has no thumbnail to fetch. Its
+  // path is static, so it is matched ahead of `/api/posts/:id`.
+  app.get("/api/posts/drafts", async (request, reply) => {
+    const ctx = await authenticateClientRequest(request, reply);
+    if (!ctx) return reply;
+
+    const { pool } = app.deps;
+    const posts = await listPendingPosts(pool, ctx.client.id);
+    const entries = await Promise.all(
+      posts.map(async (post) => ({
+        ...postView(post),
+        // The platform selection a User made before saving — a Draft's Targets
+        // exist from creation, they have just never been attempted.
+        targets: (await listTargets(pool, post.id)).map(targetView),
+      })),
+    );
+
+    return reply.code(200).send({ posts: entries });
+  });
+
   // Compose a Post: saved as a Draft, scheduled for later, or published
   // immediately (PRD stories 29–36) depending on the body's `draft`/`scheduledAt`.
   app.post<{ Body: ComposeBody }>("/api/posts", async (request, reply) => {
@@ -376,6 +402,65 @@ export async function registerPostRoutes(app: FastifyInstance): Promise<void> {
       scheduledAt: null,
     });
     return reply.code(200).send({ post: postView(updated) });
+  });
+
+  // Publish a Draft or Scheduled Post right now — the composer's "Publish now"
+  // for a Post that already exists.
+  //
+  // Its own route rather than part of the PATCH above, because that one is
+  // *editing before a Post fires* and deliberately refuses to publish. Without
+  // this, finishing a Draft written yesterday would mean composing it from
+  // scratch, leaving the original behind as a duplicate.
+  //
+  // The Post's own stored content and platform selection are fed back through
+  // {@link resolveCompose}, so this passes through exactly the same
+  // validate-and-gate an immediate compose does — Plan, connected account, dead
+  // token, per-platform content rules — rather than a second copy of those checks
+  // that could drift from it.
+  app.post<{ Params: { id: string } }>("/api/posts/:id/publish", async (request, reply) => {
+    const ctx = await authenticateClientRequest(request, reply);
+    if (!ctx) return reply;
+
+    const { pool, clock, publisher, mediaDir, mediaBaseUrl } = app.deps;
+    const post = await findPost(pool, ctx.client.id, request.params.id);
+    if (!post) {
+      return reply.code(404).send({ error: "post_not_found" });
+    }
+    if (post.status !== "draft" && post.status !== "scheduled") {
+      return reply.code(409).send({
+        error: "not_publishable",
+        message: "Only a Draft or Scheduled Post can be published this way.",
+      });
+    }
+
+    const targets = await listTargets(pool, post.id);
+    const resolution = await resolveCompose(
+      pool,
+      clock,
+      mediaBaseUrl,
+      ctx.client.id,
+      ctx.client.plan,
+      {
+        text: post.text,
+        // Resolved from the id rather than trusted from the stored URL: Media
+        // attached to a Draft may have been purged since (ADR 0003), and that has
+        // to be caught here rather than handed to the Publisher as a dead URL.
+        ...(post.mediaId ? { media: { mediaId: post.mediaId } } : {}),
+        platforms: targets.map((target) => target.platform),
+      },
+    );
+    if (!resolution.ok) {
+      return reply.code(resolution.code).send(resolution.body);
+    }
+
+    // No content write ahead of the fan-out: nothing about the Post is changing,
+    // and publishPost's roll-up is what sets its status and clears `scheduled_at`.
+    const settled = await publishPost(pool, clock, publisher, mediaDir, post, targets);
+    const final = await findPost(pool, ctx.client.id, post.id);
+
+    return reply
+      .code(200)
+      .send({ post: postView(final ?? post), targets: settled.map(targetView) });
   });
 
   // A Post's current state — used to watch a Publishing Post settle, and to
@@ -513,6 +598,10 @@ function postView(post: Post) {
     id: post.id,
     text: post.text,
     media: post.media,
+    // The composer needs the id, not just the URL: re-saving an edited Draft
+    // means sending `media.mediaId` back, and a Draft whose Media it could only
+    // see as a URL would silently lose its attachment on every edit.
+    mediaId: post.mediaId,
     status: post.status,
     scheduledAt: post.scheduledAt,
     createdAt: post.createdAt,

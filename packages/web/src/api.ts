@@ -26,6 +26,13 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /**
+     * Per-platform detail, when the API refused for reasons that differ by
+     * platform (compose's 422 `invalid_content`). Carried alongside `message`
+     * rather than flattened into it so the composer can put each reason on the
+     * platform it belongs to, which is where a User can act on it.
+     */
+    readonly reasons?: Partial<Record<Platform, string>>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -35,6 +42,7 @@ export class ApiError extends Error {
 interface ApiErrorBody {
   error?: string;
   message?: string;
+  reasons?: Partial<Record<Platform, string>>;
 }
 
 export async function apiFetch<T>(
@@ -54,12 +62,41 @@ export async function apiFetch<T>(
   const body = text ? (JSON.parse(text) as unknown) : {};
 
   if (!response.ok) {
-    const { error, message } = body as ApiErrorBody;
-    throw new ApiError(
-      response.status,
-      error ?? "unknown_error",
-      message ?? error ?? `Request failed (${response.status})`,
-    );
+    throw errorFrom(response.status, body);
+  }
+  return body as T;
+}
+
+function errorFrom(status: number, body: unknown): ApiError {
+  const { error, message, reasons } = body as ApiErrorBody;
+  return new ApiError(
+    status,
+    error ?? "unknown_error",
+    message ?? error ?? `Request failed (${status})`,
+    reasons,
+  );
+}
+
+/**
+ * Upload a Media file. Separate from {@link apiFetch} because the upload route
+ * takes the file's *raw bytes* under its own Content-Type (ADR 0003) rather than
+ * a JSON envelope — a File is sent as-is, and the browser's own type is what
+ * tells the API whether this is an image or a video.
+ */
+export async function apiUpload<T>(path: string, file: File): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {
+      "content-type": file.type,
+      ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
+    },
+    body: file,
+  });
+
+  const text = await response.text();
+  const body = text ? (JSON.parse(text) as unknown) : {};
+  if (!response.ok) {
+    throw errorFrom(response.status, body);
   }
   return body as T;
 }
@@ -137,3 +174,145 @@ export const disconnectPlatform = (platform: Platform) =>
   apiFetch<{ connection: ConnectedAccount }>(`/api/connections/${platform}`, {
     method: "DELETE",
   });
+
+/* ---------------------------------------------------------------- Composing */
+
+export type PostStatus =
+  | "draft"
+  | "scheduled"
+  | "publishing"
+  | "published"
+  | "partially_published"
+  | "failed";
+
+export type TargetStatus = "pending" | "published" | "failed";
+
+export interface UploadedMedia {
+  id: string;
+  url: string;
+  type: "image" | "video";
+}
+
+export interface Post {
+  id: string;
+  text: string;
+  media: { url: string; type: "image" | "video" } | null;
+  /** The attached Media's id — what an edit re-sends to keep the attachment. */
+  mediaId: string | null;
+  status: PostStatus;
+  /** UTC, and set only while `scheduled`. Rendered in the Client's timezone. */
+  scheduledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One platform a Post was sent to, and how that one landed. */
+export interface PostTarget {
+  platform: Platform;
+  status: TargetStatus;
+  externalId: string | null;
+  permalink: string | null;
+  error: string | null;
+  retryCount: number;
+}
+
+export interface PostWithTargets {
+  post: Post;
+  targets: PostTarget[];
+}
+
+/** A history row: a Post, its Targets, and a thumbnail fetched live (ADR 0003). */
+export interface PostHistoryEntry extends Post {
+  thumbnailUrl: string | null;
+  targets: PostTarget[];
+}
+
+/** A Draft or Scheduled Post, with the platform selection it is holding. */
+export interface PendingPost extends Post {
+  targets: PostTarget[];
+}
+
+/** Live per-post numbers. Every field optional — platforms expose different ones. */
+export interface PostMetrics {
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  views?: number;
+}
+
+export interface TargetMetrics {
+  platform: Platform;
+  status: TargetStatus;
+  permalink: string | null;
+  /** Null when there is nothing readable — not published, or the platform refused. */
+  metrics: PostMetrics | null;
+}
+
+/**
+ * What a compose or edit sends. `platforms` is the whole selection every time —
+ * the API replaces a Post's Targets wholesale rather than diffing them.
+ *
+ * Which of the three outcomes this becomes is decided by these two fields, not
+ * by a mode flag: `draft: true` saves it as-is and ungated, a `scheduledAt`
+ * schedules it, and neither publishes it immediately.
+ */
+export interface ComposeInput {
+  text: string;
+  platforms: Platform[];
+  mediaId?: string | null;
+  /** ISO UTC. Built from the Client's timezone, never the browser's. */
+  scheduledAt?: string | null;
+  draft?: boolean;
+}
+
+function composeBody(input: ComposeInput): Record<string, unknown> {
+  return {
+    text: input.text,
+    platforms: input.platforms,
+    // Omitted rather than nulled: the API reads a *present* `media` key as "this
+    // Post has an attachment", and a present-but-empty one is a 400.
+    ...(input.mediaId ? { media: { mediaId: input.mediaId } } : {}),
+    ...(input.scheduledAt ? { scheduledAt: input.scheduledAt } : {}),
+    ...(input.draft ? { draft: true } : {}),
+  };
+}
+
+export const uploadMedia = (file: File) => apiUpload<UploadedMedia>("/api/media", file);
+
+export const composePost = (input: ComposeInput) =>
+  apiFetch<PostWithTargets>("/api/posts", { method: "POST", body: composeBody(input) });
+
+/** Edit a Draft or Scheduled Post before it fires. Cannot publish — see below. */
+export const updatePost = (id: string, input: ComposeInput) =>
+  apiFetch<PostWithTargets>(`/api/posts/${id}`, { method: "PATCH", body: composeBody(input) });
+
+/**
+ * Send a Draft or Scheduled Post now. Its own call because `updatePost` is
+ * editing-before-it-fires and refuses to publish: finishing a Draft is a
+ * separate act from revising one.
+ */
+export const publishPostNow = (id: string) =>
+  apiFetch<PostWithTargets>(`/api/posts/${id}/publish`, { method: "POST" });
+
+/** Cancel a Scheduled Post. It becomes a Draft — the content survives. */
+export const cancelScheduledPost = (id: string) =>
+  apiFetch<{ post: Post }>(`/api/posts/${id}/cancel`, { method: "POST" });
+
+export const listPostHistory = () =>
+  apiFetch<{ posts: PostHistoryEntry[] }>("/api/posts").then((b) => b.posts);
+
+export const listPendingPosts = () =>
+  apiFetch<{ posts: PendingPost[] }>("/api/posts/drafts").then((b) => b.posts);
+
+export const getPost = (id: string) => apiFetch<PostWithTargets>(`/api/posts/${id}`);
+
+export const getPostMetrics = (id: string) =>
+  apiFetch<{ post: Post; targets: TargetMetrics[] }>(`/api/posts/${id}/metrics`);
+
+/** Retry one failed Target, after the automatic attempts have given up. */
+export const retryTarget = (id: string, platform: Platform) =>
+  apiFetch<PostWithTargets>(`/api/posts/${id}/targets/${platform}/retry`, { method: "POST" });
+
+/** Re-attach freshly uploaded Media to a Post whose own was purged (ADR 0003). */
+export const attachMediaToPost = (id: string, mediaId: string) =>
+  apiFetch<{ post: Post }>(`/api/posts/${id}/media`, { method: "POST", body: { mediaId } });

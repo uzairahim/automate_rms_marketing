@@ -3,6 +3,9 @@ import { apiFetch, getSessionToken, setSessionToken } from "./api.js";
 import type { Session } from "./session.js";
 import { LoginScreen } from "./LoginScreen.jsx";
 import { Connections } from "./Connections.jsx";
+import { Composer } from "./Composer.jsx";
+import { Posts } from "./Posts.jsx";
+import { PostDetail } from "./PostDetail.jsx";
 import { FacebookCallback } from "./FacebookCallback.jsx";
 import { TikTokCallback } from "./TikTokCallback.jsx";
 
@@ -36,6 +39,30 @@ const FACEBOOK_CALLBACK_PATH = "/oauth/facebook/callback";
 const TIKTOK_CALLBACK_PATH = "/oauth/tiktok/callback";
 
 /**
+ * Where a signed-in User is inside the workspace.
+ *
+ * Held in state rather than in the URL, matching how the OAuth callbacks are
+ * already the only paths this SPA reads: there is no router here, and adding one
+ * for three destinations would be more machinery than the app has earned. The
+ * cost is that a reload lands back on the composer, which is the right place to
+ * land anyway.
+ *
+ * `compose` carries an optional Post id because finishing a Draft and writing
+ * something new are the same screen — the composer just starts populated.
+ */
+type View =
+  | { kind: "compose"; postId: string | null }
+  | { kind: "posts" }
+  | { kind: "post"; id: string }
+  | { kind: "connections" };
+
+const TABS = [
+  { label: "Compose", kind: "compose" },
+  { label: "Posts", kind: "posts" },
+  { label: "Accounts", kind: "connections" },
+] as const;
+
+/**
  * Client SPA shell. Applies the Client's white-label branding (logo, primary
  * color, app name) resolved from the subdomain, so the app feels like the
  * Client's own tool — including on the login screen, before anyone
@@ -50,6 +77,8 @@ export function App() {
   // nothing.
   const [resolvingSession, setResolvingSession] = useState(true);
   const [path, setPath] = useState(window.location.pathname);
+  // Composing is the app's reason to exist, so it is where a signed-in User lands.
+  const [view, setView] = useState<View>({ kind: "compose", postId: null });
 
   useEffect(() => {
     let cancelled = false;
@@ -108,6 +137,7 @@ export function App() {
   function signOut() {
     setSessionToken(null);
     setSession(null);
+    setView({ kind: "compose", postId: null });
   }
 
   /** Leave the OAuth callback URL behind, so a reload doesn't replay it. */
@@ -164,11 +194,113 @@ export function App() {
       ) : path === TIKTOK_CALLBACK_PATH ? (
         <TikTokCallback onDone={returnToWorkspace} />
       ) : (
-        <Connections />
+        <>
+          <Nav view={view} onNavigate={setView} />
+          <Workspace session={session} view={view} onNavigate={setView} />
+        </>
       )}
     </main>
   );
 }
+
+/**
+ * The three places a User works. A tab is underlined in the Client's own accent
+ * rather than a generic blue, for the same reason the primary button is.
+ *
+ * A Post's detail is not a tab — it is reached *from* the Posts list and keeps
+ * that tab lit, because that is where the back button returns to.
+ */
+function Nav({ view, onNavigate }: { view: View; onNavigate: (view: View) => void }) {
+  const activeTab = view.kind === "post" ? "posts" : view.kind;
+
+  return (
+    <nav style={navStyle}>
+      {TABS.map((tab) => {
+        const active = tab.kind === activeTab;
+        return (
+          <button
+            key={tab.kind}
+            type="button"
+            onClick={() =>
+              onNavigate(tab.kind === "compose" ? { kind: "compose", postId: null } : { kind: tab.kind })
+            }
+            aria-current={active ? "page" : undefined}
+            style={{
+              ...tabStyle,
+              color: active ? "var(--brand-primary)" : "#64748b",
+              fontWeight: active ? 600 : 400,
+              borderBottomColor: active ? "var(--brand-primary)" : "transparent",
+            }}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+/**
+ * The current view, wired to the navigation each screen needs to hand off to:
+ * publishing goes to the outcome, saving goes to the list of what is waiting,
+ * and editing a Draft goes back to the composer holding it.
+ */
+function Workspace({
+  session,
+  view,
+  onNavigate,
+}: {
+  session: Session;
+  view: View;
+  onNavigate: (view: View) => void;
+}) {
+  switch (view.kind) {
+    case "compose":
+      return (
+        <Composer
+          session={session}
+          postId={view.postId}
+          onPublished={(id) => onNavigate({ kind: "post", id })}
+          onSaved={() => onNavigate({ kind: "posts" })}
+          onLeaveEdit={() => onNavigate({ kind: "posts" })}
+        />
+      );
+    case "posts":
+      return (
+        <Posts
+          session={session}
+          onEdit={(postId) => onNavigate({ kind: "compose", postId })}
+          onOpen={(id) => onNavigate({ kind: "post", id })}
+        />
+      );
+    case "post":
+      return (
+        <PostDetail
+          session={session}
+          postId={view.id}
+          onBack={() => onNavigate({ kind: "posts" })}
+        />
+      );
+    case "connections":
+      return <Connections />;
+  }
+}
+
+const navStyle = {
+  display: "flex",
+  gap: "1.5rem",
+  marginTop: "1.25rem",
+  borderBottom: "1px solid #e2e8f0",
+} as const;
+
+const tabStyle = {
+  padding: "0 0 0.625rem",
+  background: "none",
+  border: "none",
+  borderBottom: "2px solid transparent",
+  fontSize: "0.938rem",
+  cursor: "pointer",
+} as const;
 
 const linkButtonStyle = {
   background: "none",
