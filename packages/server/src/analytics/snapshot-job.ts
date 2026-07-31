@@ -5,6 +5,7 @@ import { PublisherError, type Platform, type Publisher } from "../core/publisher
 import { openCredential } from "../connections/credentials.js";
 import { markTokenExpired } from "../connections/accounts.js";
 import { recordSnapshot } from "./metric-snapshots.js";
+import { dayIn } from "./range.js";
 
 /**
  * The daily metric-snapshot job (ADR 0004) — the third of the recurring jobs the
@@ -53,16 +54,11 @@ interface AccountRow {
  * on different sides of midnight — which is the point: each Client's trend is in
  * its own days, not the server's.
  *
- * `en-CA` formats as `YYYY-MM-DD`, which is exactly the column's stored form.
+ * The same helper the dashboard's range is cut with ({@link ./range.ts}), so the
+ * day a snapshot is *written* under and the day it is *read* under can never
+ * disagree.
  */
-export function snapshotDateFor(now: Date, timezone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
+export const snapshotDateFor = dayIn;
 
 /**
  * Snapshot every connected account's account-level numbers for today. Returns

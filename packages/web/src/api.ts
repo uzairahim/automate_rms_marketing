@@ -316,3 +316,77 @@ export const retryTarget = (id: string, platform: Platform) =>
 /** Re-attach freshly uploaded Media to a Post whose own was purged (ADR 0003). */
 export const attachMediaToPost = (id: string, mediaId: string) =>
   apiFetch<{ post: Post }>(`/api/posts/${id}/media`, { method: "POST", body: { mediaId } });
+
+/* --------------------------------------------------------------- Analytics */
+
+/**
+ * One day on a Connected Account's trend line. Every metric is nullable because
+ * the platforms disagree on what they expose (TikTok reports no reach at all), and
+ * a field we could not read is a null rather than a fabricated zero (ADR 0004).
+ */
+export interface DailyMetricPoint {
+  /** `YYYY-MM-DD` in the Client's timezone. */
+  date: string;
+  followers: number | null;
+  reach: number | null;
+  engagement: number | null;
+  postsPublished: number | null;
+}
+
+/** One connected platform's whole trend. Identical in shape across all three. */
+export interface AccountSeries {
+  platform: Platform;
+  displayName: string | null;
+  /** Empty for an account connected but not yet snapshotted — never a gap. */
+  series: DailyMetricPoint[];
+}
+
+/** One day's deliveries. Every day in the range is present, zeros included. */
+export interface DeliveryPoint {
+  date: string;
+  published: number;
+  failed: number;
+}
+
+export interface PlatformDelivery {
+  platform: Platform;
+  published: number;
+  failed: number;
+}
+
+/** What is still ahead — deliberately not scoped to the range. */
+export interface Upcoming {
+  scheduled: number;
+  drafts: number;
+  /** UTC. Rendered in the Client's timezone. */
+  nextScheduledAt: string | null;
+}
+
+/** What this Client published, counted from our own records — no platform calls. */
+export interface PostActivity {
+  daily: DeliveryPoint[];
+  byPlatform: PlatformDelivery[];
+  /** Posts *composed* in the range, by the state they ended in. */
+  posts: Record<PostStatus, number>;
+  upcoming: Upcoming;
+}
+
+/** The window everything on the dashboard is cut to, in the Client's timezone. */
+export interface AnalyticsRange {
+  days: number;
+  from: string;
+  to: string;
+}
+
+export interface Analytics {
+  range: AnalyticsRange;
+  accounts: AccountSeries[];
+  posts: PostActivity;
+}
+
+/**
+ * The dashboard's one read. `days` scopes both halves together — the account
+ * trends and the publishing activity are always on the same window.
+ */
+export const getAnalytics = (days: number) =>
+  apiFetch<Analytics>(`/api/analytics?days=${days}`);

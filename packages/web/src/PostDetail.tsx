@@ -12,6 +12,7 @@ import {
   type TargetMetrics,
 } from "./api.js";
 import { PLATFORM_LABELS } from "./postRules.js";
+import { compactNumber } from "./charts.jsx";
 import type { Session } from "./session.js";
 import { formatInZone } from "./timezone.js";
 import {
@@ -344,21 +345,11 @@ function Metrics({ metrics, published }: { metrics: TargetMetrics["metrics"]; pu
       {entries.map(([label, value]) => (
         <div key={label} className="card-soft px-3.5 py-3">
           <dt className="text-note text-muted">{label}</dt>
-          <dd className="m-0 mt-0.5 text-title-lg font-semibold text-ink">{compact(value)}</dd>
+          <dd className="m-0 mt-0.5 text-title-lg font-semibold text-ink">
+            {compactNumber(value)}
+          </dd>
         </div>
       ))}
     </dl>
   );
-}
-
-/**
- * A count at headline size: grouped below ten thousand, compacted above it, so
- * a viral post reads as `12.9K` rather than running past the tile it sits in.
- * Proportional figures deliberately — `tabular-nums` is for columns that must
- * align, and it makes a standalone number look loose at this size.
- */
-function compact(value: number): string {
-  return value < 10_000
-    ? value.toLocaleString()
-    : value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 });
 }

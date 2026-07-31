@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { apiFetch, getSessionToken, setSessionToken } from "./api.js";
 import type { Session } from "./session.js";
 import { LoginScreen } from "./LoginScreen.jsx";
+import { Dashboard } from "./Dashboard.jsx";
 import { Connections } from "./Connections.jsx";
 import { Composer } from "./Composer.jsx";
 import { Posts } from "./Posts.jsx";
@@ -24,20 +25,22 @@ const TIKTOK_CALLBACK_PATH = "/oauth/tiktok/callback";
  *
  * Held in state rather than in the URL, matching how the OAuth callbacks are
  * already the only paths this SPA reads: there is no router here, and adding one
- * for three destinations would be more machinery than the app has earned. The
- * cost is that a reload lands back on the composer, which is the right place to
+ * for four destinations would be more machinery than the app has earned. The
+ * cost is that a reload lands back on the dashboard, which is the right place to
  * land anyway.
  *
  * `compose` carries an optional Post id because finishing a Draft and writing
  * something new are the same screen — the composer just starts populated.
  */
 type View =
+  | { kind: "dashboard" }
   | { kind: "compose"; postId: string | null }
   | { kind: "posts" }
   | { kind: "post"; id: string }
   | { kind: "connections" };
 
 const TABS = [
+  { label: "Dashboard", kind: "dashboard", icon: DashboardIcon, blurb: "How it's doing" },
   { label: "Compose", kind: "compose", icon: ComposeIcon, blurb: "Write one post" },
   { label: "Posts", kind: "posts", icon: PostsIcon, blurb: "Scheduled and sent" },
   { label: "Accounts", kind: "connections", icon: AccountsIcon, blurb: "Connected platforms" },
@@ -58,8 +61,10 @@ export function App() {
   // nothing.
   const [resolvingSession, setResolvingSession] = useState(true);
   const [path, setPath] = useState(window.location.pathname);
-  // Composing is the app's reason to exist, so it is where a signed-in User lands.
-  const [view, setView] = useState<View>({ kind: "compose", postId: null });
+  // The dashboard is where a signed-in User lands: it is the one screen that
+  // answers "how is this going" without being asked, and it is a read — arriving
+  // on the composer would open an empty form nobody requested.
+  const [view, setView] = useState<View>({ kind: "dashboard" });
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +123,7 @@ export function App() {
   function signOut() {
     setSessionToken(null);
     setSession(null);
-    setView({ kind: "compose", postId: null });
+    setView({ kind: "dashboard" });
   }
 
   /** Leave the OAuth callback URL behind, so a reload doesn't replay it. */
@@ -281,7 +286,16 @@ function Sidebar({
   );
 }
 
-/** The three destinations, shared by the rail and the mobile bar. */
+/**
+ * The View a nav entry leads to. Only `compose` needs anything beyond its kind —
+ * it starts on a blank Post, since arriving from the rail is never "finish that
+ * Draft" (that entry point is the Posts list's Edit).
+ */
+function destinationOf(kind: (typeof TABS)[number]["kind"]): View {
+  return kind === "compose" ? { kind, postId: null } : { kind };
+}
+
+/** The four destinations, shared by the rail and the mobile bar. */
 function NavItems({
   view,
   onNavigate,
@@ -304,11 +318,7 @@ function NavItems({
           <button
             key={tab.kind}
             type="button"
-            onClick={() =>
-              onNavigate(
-                tab.kind === "compose" ? { kind: "compose", postId: null } : { kind: tab.kind },
-              )
-            }
+            onClick={() => onNavigate(destinationOf(tab.kind))}
             aria-current={active ? "page" : undefined}
             className="nav-item"
           >
@@ -395,11 +405,7 @@ function MobileNav({ view, onNavigate }: { view: View; onNavigate: (view: View) 
           <button
             key={tab.kind}
             type="button"
-            onClick={() =>
-              onNavigate(
-                tab.kind === "compose" ? { kind: "compose", postId: null } : { kind: tab.kind },
-              )
-            }
+            onClick={() => onNavigate(destinationOf(tab.kind))}
             aria-current={active ? "page" : undefined}
             className="nav-item flex-1 flex-col justify-center gap-1 px-2 py-2 text-note"
           >
@@ -427,6 +433,8 @@ function Workspace({
   onNavigate: (view: View) => void;
 }) {
   switch (view.kind) {
+    case "dashboard":
+      return <Dashboard session={session} />;
     case "compose":
       return (
         <Composer
@@ -461,9 +469,9 @@ function Workspace({
 /* -------------------------------------------------------------------- Icons */
 
 /**
- * Drawn inline rather than pulled from an icon set: three icons do not justify
+ * Drawn inline rather than pulled from an icon set: four icons do not justify
  * a dependency, and hand-drawing them keeps the stroke weight matched to the
- * type. All three share a 24px box, a 1.6 stroke, and round joins.
+ * type. All four share a 24px box, a 1.6 stroke, and round joins.
  */
 const iconProps = {
   width: 19,
@@ -477,6 +485,18 @@ const iconProps = {
   "aria-hidden": true,
   className: "shrink-0",
 } as const;
+
+/** Three columns of different heights — the shape the dashboard actually draws. */
+function DashboardIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M4 20h16" />
+      <path d="M7.5 20v-5" />
+      <path d="M12 20V8" />
+      <path d="M16.5 20v-8" />
+    </svg>
+  );
+}
 
 function ComposeIcon() {
   return (

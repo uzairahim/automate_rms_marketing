@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { PLATFORMS, type AccountMetrics, type Platform } from "../core/publisher.js";
+import type { DateRange } from "./range.js";
 
 /**
  * The Metric Snapshot store (CONTEXT.md `Metric Snapshot`; ADR 0004).
@@ -91,7 +92,7 @@ interface SeriesRow {
 
 /**
  * A Client's account-level analytics: one trend per *connected* platform, each an
- * ordered series of daily points.
+ * ordered series of daily points within `range`.
  *
  * Scoped to the Client's currently-connected accounts, so the dashboard reflects
  * what the Client has connected right now — a platform it never connected does
@@ -99,10 +100,19 @@ interface SeriesRow {
  * a freshly-connected account (no snapshots yet) in the result with an empty
  * series, so the dashboard renders it gracefully rather than dropping it.
  *
+ * The range is applied in the JOIN rather than in the WHERE for exactly that
+ * reason: filtering afterwards would drop an account whose snapshots all fall
+ * outside the window, when what the dashboard needs is the account present and
+ * the series empty.
+ *
  * `snapshot_date` is read back as text (`::text`) so a day is exactly the
  * `YYYY-MM-DD` that was stored, never shifted by the driver's date parsing.
  */
-export async function accountAnalytics(pool: pg.Pool, clientId: string): Promise<AccountSeries[]> {
+export async function accountAnalytics(
+  pool: pg.Pool,
+  clientId: string,
+  range: DateRange,
+): Promise<AccountSeries[]> {
   const { rows } = await pool.query<SeriesRow>(
     `SELECT ca.platform,
             ca.display_name,
@@ -112,10 +122,12 @@ export async function accountAnalytics(pool: pg.Pool, clientId: string): Promise
             ms.engagement,
             ms.posts_published
      FROM connected_accounts ca
-     LEFT JOIN metric_snapshots ms ON ms.connected_account_id = ca.id
+     LEFT JOIN metric_snapshots ms
+            ON ms.connected_account_id = ca.id
+           AND ms.snapshot_date BETWEEN $2::date AND $3::date
      WHERE ca.client_id = $1 AND ca.status = 'connected'
      ORDER BY ca.platform ASC, ms.snapshot_date ASC`,
-    [clientId],
+    [clientId, range.from, range.to],
   );
 
   const byPlatform = new Map<Platform, AccountSeries>();
