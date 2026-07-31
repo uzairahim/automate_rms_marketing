@@ -16,14 +16,11 @@ import type { Session } from "./session.js";
 import { formatInZone } from "./timezone.js";
 import {
   ErrorNote,
+  LoadingNote,
   MediaPreview,
+  PlatformTile,
   PostStatusBadge,
   TargetStatusBadge,
-  cardStyle,
-  disabledStyle,
-  linkButtonStyle,
-  secondaryButtonStyle,
-  sectionHeadingStyle,
 } from "./ui.jsx";
 
 /**
@@ -33,7 +30,8 @@ import {
  * not have *an* outcome: each Target publishes independently and a success is
  * never rolled back because a sibling failed (CONTEXT.md `Target`). So Facebook
  * saying "Published, here's the link" next to TikTok saying "Failed, retry" is
- * the normal case to render well, not an edge case.
+ * the normal case to render well, not an edge case — which is why each Target
+ * gets its own card rather than a row in a shared table.
  *
  * Two things are fetched separately and deliberately. The Post itself is a cheap
  * DB read, which is what makes it safe to poll while Targets are still settling.
@@ -174,11 +172,9 @@ export function PostDetail({
 
   if (!post) {
     return (
-      <section style={{ marginTop: "2rem" }}>
-        <button type="button" onClick={onBack} style={linkButtonStyle}>
-          ← Back to posts
-        </button>
-        {error ? <ErrorNote>{error}</ErrorNote> : <p style={{ color: "#64748b" }}>Loading…</p>}
+      <section>
+        <BackLink onBack={onBack} />
+        {error ? <ErrorNote>{error}</ErrorNote> : <LoadingNote>Loading…</LoadingNote>}
       </section>
     );
   }
@@ -187,30 +183,27 @@ export function PostDetail({
     metrics?.find((entry) => entry.platform === platform)?.metrics ?? null;
 
   return (
-    <section style={{ marginTop: "2rem", maxWidth: "38rem" }}>
-      <button type="button" onClick={onBack} style={linkButtonStyle}>
-        ← Back to posts
-      </button>
+    <section>
+      <BackLink onBack={onBack} />
 
-      <div style={{ display: "flex", alignItems: "baseline", gap: "0.75rem", marginTop: "0.75rem" }}>
-        <h2 style={{ ...sectionHeadingStyle, margin: 0 }}>Post</h2>
+      <div className="mb-5 mt-5 flex flex-wrap items-center gap-3">
+        <h2 className="m-0 text-display-sm text-ink">Post</h2>
         <PostStatusBadge status={post.status} />
+        <span className="text-note text-muted">
+          {post.status === "scheduled" && post.scheduledAt
+            ? `Scheduled for ${formatInZone(post.scheduledAt, timeZone)}`
+            : `Created ${formatInZone(post.createdAt, timeZone)}`}
+        </span>
       </div>
 
-      <p style={{ fontSize: "0.813rem", color: "#64748b", margin: "0.25rem 0 1rem" }}>
-        {post.status === "scheduled" && post.scheduledAt
-          ? `Scheduled for ${formatInZone(post.scheduledAt, timeZone)}`
-          : `Created ${formatInZone(post.createdAt, timeZone)}`}
-      </p>
-
-      <div style={cardStyle}>
+      <div className="card p-5">
         {post.text ? (
-          <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{post.text}</p>
+          <p className="m-0 whitespace-pre-wrap text-body-md text-ink-strong">{post.text}</p>
         ) : (
-          <p style={{ margin: 0, color: "#64748b", fontStyle: "italic" }}>No text</p>
+          <p className="m-0 text-body-md italic text-muted">No text</p>
         )}
         {post.media && (
-          <div style={{ marginTop: "0.75rem" }}>
+          <div className="mt-4">
             <MediaPreview url={post.media.url} type={post.media.type} size="9rem" />
           </div>
         )}
@@ -219,8 +212,8 @@ export function PostDetail({
       {error && <ErrorNote>{error}</ErrorNote>}
 
       {needsReupload && (
-        <div role="alert" style={purgedStyle}>
-          <p style={{ margin: 0 }}>
+        <div role="alert" className="callout mt-4">
+          <p className="m-0">
             The attached media was purged 24 hours after the failure, so there is nothing left to
             publish. Re-upload it, then retry.
           </p>
@@ -228,11 +221,7 @@ export function PostDetail({
             type="button"
             onClick={() => fileInput.current?.click()}
             disabled={busy === "upload"}
-            style={{
-              ...secondaryButtonStyle,
-              alignSelf: "flex-start",
-              ...disabledStyle(busy === "upload"),
-            }}
+            className="btn btn-secondary btn-sm self-start"
           >
             {busy === "upload" ? "Uploading…" : "Re-upload media"}
           </button>
@@ -241,24 +230,27 @@ export function PostDetail({
             type="file"
             accept="image/*,video/*"
             onChange={(e) => reupload(e.target.files?.[0])}
-            style={{ display: "none" }}
+            className="hidden"
           />
         </div>
       )}
 
-      <h3 style={{ ...sectionHeadingStyle, fontSize: "0.938rem", margin: "1.5rem 0 0.5rem" }}>
-        Platforms
-      </h3>
-      <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+      <h3 className="mb-4 mt-10 text-overline uppercase text-muted">Platforms</h3>
+
+      <ul className="m-0 flex list-none flex-col gap-3 p-0">
         {targets.map((target) => (
-          <li key={target.platform} style={targetRowStyle}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-              <strong style={{ fontSize: "0.938rem" }}>{PLATFORM_LABELS[target.platform]}</strong>
+          <li key={target.platform} className="card p-5">
+            <div className="flex flex-wrap items-center gap-3">
+              <PlatformTile platform={target.platform} size="sm" />
+              <strong className="text-title-sm text-ink">
+                {PLATFORM_LABELS[target.platform]}
+              </strong>
               <TargetStatusBadge status={target.status} />
+
               {/* An auto-retry that has already been scheduled — so a User waiting
                   on a pending Target knows something is still happening. */}
               {target.status === "pending" && target.retryCount > 0 && (
-                <span style={{ fontSize: "0.813rem", color: "#64748b" }}>
+                <span className="text-note text-muted">
                   retry {target.retryCount} of 2 queued
                 </span>
               )}
@@ -268,28 +260,27 @@ export function PostDetail({
                   type="button"
                   onClick={() => void retry(target.platform)}
                   disabled={busy !== null}
-                  style={{
-                    ...secondaryButtonStyle,
-                    padding: "0.25rem 0.75rem",
-                    ...disabledStyle(busy !== null),
-                  }}
+                  className="btn btn-secondary btn-sm ml-auto"
                 >
                   {busy === target.platform ? "Retrying…" : "Retry"}
                 </button>
               )}
+
+              {target.permalink && (
+                <a
+                  href={target.permalink}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-link ml-auto"
+                >
+                  View on {PLATFORM_LABELS[target.platform]}
+                  <span aria-hidden="true">↗</span>
+                </a>
+              )}
             </div>
 
-            {target.error && <p style={targetErrorStyle}>{target.error}</p>}
-
-            {target.permalink && (
-              <a
-                href={target.permalink}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: "0.813rem", color: "var(--brand-primary)" }}
-              >
-                View on {PLATFORM_LABELS[target.platform]}
-              </a>
+            {target.error && (
+              <p className="m-0 mt-3 text-body-sm text-[#a72020]">{target.error}</p>
             )}
 
             {/* Only once the Post has settled: before that no metrics have been
@@ -308,19 +299,31 @@ export function PostDetail({
   );
 }
 
+function BackLink({ onBack }: { onBack: () => void }) {
+  return (
+    <button type="button" onClick={onBack} className="btn-link btn-quiet">
+      <span aria-hidden="true">←</span> Back to posts
+    </button>
+  );
+}
+
 /**
- * One Target's live numbers. Every field is optional because the platforms
- * disagree on what they expose, and an absent one is left out rather than shown
- * as a zero — a fabricated 0 shares is a worse answer than no answer.
+ * One Target's live numbers, as a row of stat tiles.
+ *
+ * A row of headline figures rather than a chart: there are at most four values,
+ * no time axis and no prior period to compare against, so a chart would be
+ * decoration around numbers that are already the whole story. The figures wear
+ * ink rather than the platform's color — color here would imply an encoding
+ * that does not exist.
+ *
+ * Every field is optional because the platforms disagree on what they expose,
+ * and an absent one is left out rather than shown as a zero — a fabricated
+ * 0 shares is a worse answer than no answer.
  */
 function Metrics({ metrics, published }: { metrics: TargetMetrics["metrics"]; published: boolean }) {
   if (!published) return null;
   if (!metrics) {
-    return (
-      <p style={{ fontSize: "0.813rem", color: "#94a3b8", margin: "0.375rem 0 0" }}>
-        Metrics unavailable right now.
-      </p>
-    );
+    return <p className="m-0 mt-3 text-note text-faint">Metrics unavailable right now.</p>;
   }
 
   const entries = [
@@ -332,54 +335,30 @@ function Metrics({ metrics, published }: { metrics: TargetMetrics["metrics"]; pu
 
   if (entries.length === 0) {
     return (
-      <p style={{ fontSize: "0.813rem", color: "#94a3b8", margin: "0.375rem 0 0" }}>
-        This platform reports no numbers for a post.
-      </p>
+      <p className="m-0 mt-3 text-note text-faint">This platform reports no numbers for a post.</p>
     );
   }
 
   return (
-    <dl style={metricsStyle}>
+    <dl className="m-0 mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
       {entries.map(([label, value]) => (
-        <div key={label}>
-          <dt style={{ fontSize: "0.75rem", color: "#64748b" }}>{label}</dt>
-          <dd style={{ margin: 0, fontSize: "0.938rem", fontWeight: 600 }}>
-            {value.toLocaleString()}
-          </dd>
+        <div key={label} className="card-soft px-3.5 py-3">
+          <dt className="text-note text-muted">{label}</dt>
+          <dd className="m-0 mt-0.5 text-title-lg font-semibold text-ink">{compact(value)}</dd>
         </div>
       ))}
     </dl>
   );
 }
 
-const targetRowStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.25rem",
-  padding: "0.875rem 0",
-  borderBottom: "1px solid #e2e8f0",
-} as const;
-
-const targetErrorStyle = {
-  margin: 0,
-  fontSize: "0.813rem",
-  color: "#b91c1c",
-} as const;
-
-const metricsStyle = {
-  display: "flex",
-  gap: "1.5rem",
-  margin: "0.5rem 0 0",
-} as const;
-
-const purgedStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.625rem",
-  padding: "0.875rem",
-  marginTop: "1rem",
-  background: "#fffbeb",
-  border: "1px solid #fde68a",
-  borderRadius: "0.25rem",
-  fontSize: "0.875rem",
-} as const;
+/**
+ * A count at headline size: grouped below ten thousand, compacted above it, so
+ * a viral post reads as `12.9K` rather than running past the tile it sits in.
+ * Proportional figures deliberately — `tabular-nums` is for columns that must
+ * align, and it makes a standalone number look loose at this size.
+ */
+function compact(value: number): string {
+  return value < 10_000
+    ? value.toLocaleString()
+    : value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 });
+}

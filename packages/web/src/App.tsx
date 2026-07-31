@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { apiFetch, getSessionToken, setSessionToken } from "./api.js";
 import type { Session } from "./session.js";
 import { LoginScreen } from "./LoginScreen.jsx";
@@ -8,27 +8,8 @@ import { Posts } from "./Posts.jsx";
 import { PostDetail } from "./PostDetail.jsx";
 import { FacebookCallback } from "./FacebookCallback.jsx";
 import { TikTokCallback } from "./TikTokCallback.jsx";
-
-/**
- * A Client's white-label branding, fetched from the API at load and resolved
- * from the request subdomain (Slice 5). Mirrors the server's `Branding` shape.
- */
-interface Branding {
-  appName: string;
-  primaryColor: string;
-  logoUrl: string | null;
-}
-
-/**
- * The neutral fallback used before branding loads and if the fetch fails — kept
- * in sync with the server's `DEFAULT_BRANDING`. It mentions no operator, so a
- * Client surface never shows anything but the Client's own (or a plain) identity.
- */
-const DEFAULT_BRANDING: Branding = {
-  appName: "Social Media Studio",
-  primaryColor: "#334155",
-  logoUrl: null,
-};
+import { BrandLockup, DEFAULT_BRANDING, type Branding } from "./branding.jsx";
+import { ClayOrb } from "./ui.jsx";
 
 /**
  * The paths each platform returns a User to. One per platform, matching the
@@ -57,9 +38,9 @@ type View =
   | { kind: "connections" };
 
 const TABS = [
-  { label: "Compose", kind: "compose" },
-  { label: "Posts", kind: "posts" },
-  { label: "Accounts", kind: "connections" },
+  { label: "Compose", kind: "compose", icon: ComposeIcon, blurb: "Write one post" },
+  { label: "Posts", kind: "posts", icon: PostsIcon, blurb: "Scheduled and sent" },
+  { label: "Accounts", kind: "connections", icon: AccountsIcon, blurb: "Connected platforms" },
 ] as const;
 
 /**
@@ -147,91 +128,282 @@ export function App() {
   }
 
   return (
-    <main
+    <div
+      className="min-h-dvh"
       style={{
-        fontFamily: "system-ui, sans-serif",
-        padding: "2rem",
         // Expose the primary color as a CSS variable so any descendant can use it
         // as the brand accent, rather than threading the raw value through props.
+        // Everything the theme derives from it — tints, focus rings, the active
+        // nav pill — hangs off this one declaration.
         ["--brand-primary" as string]: branding.primaryColor,
       }}
     >
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.75rem",
-          borderBottom: "1px solid #e2e8f0",
-          paddingBottom: "1rem",
-        }}
-      >
-        {branding.logoUrl && (
-          <img
-            src={branding.logoUrl}
-            alt={`${branding.appName} logo`}
-            style={{ height: "2.5rem", width: "auto" }}
-            data-testid="brand-logo"
-          />
-        )}
-        <h1 style={{ color: "var(--brand-primary)", margin: 0 }} data-testid="brand-name">
-          {branding.appName}
-        </h1>
-
-        {session && (
-          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "1rem" }}>
-            <span style={{ fontSize: "0.875rem", color: "#64748b" }}>{session.user.email}</span>
-            <button onClick={signOut} style={linkButtonStyle}>
-              Sign out
-            </button>
-          </div>
-        )}
-      </header>
-
-      {resolvingSession ? null : !session ? (
-        <LoginScreen onLoggedIn={setSession} />
+      {resolvingSession ? (
+        <BootSplash />
+      ) : !session ? (
+        <LoginScreen branding={branding} onLoggedIn={setSession} />
       ) : path === FACEBOOK_CALLBACK_PATH ? (
-        <FacebookCallback onDone={returnToWorkspace} />
+        <CallbackFrame branding={branding}>
+          <FacebookCallback onDone={returnToWorkspace} />
+        </CallbackFrame>
       ) : path === TIKTOK_CALLBACK_PATH ? (
-        <TikTokCallback onDone={returnToWorkspace} />
+        <CallbackFrame branding={branding}>
+          <TikTokCallback onDone={returnToWorkspace} />
+        </CallbackFrame>
       ) : (
-        <>
-          <Nav view={view} onNavigate={setView} />
-          <Workspace session={session} view={view} onNavigate={setView} />
-        </>
+        <Shell
+          branding={branding}
+          session={session}
+          view={view}
+          onNavigate={setView}
+          onSignOut={signOut}
+        />
       )}
-    </main>
+    </div>
   );
 }
 
 /**
- * The three places a User works. A tab is underlined in the Client's own accent
- * rather than a generic blue, for the same reason the primary button is.
+ * The beat before we know whether anyone is signed in.
  *
- * A Post's detail is not a tab — it is reached *from* the Posts list and keeps
- * that tab lit, because that is where the back button returns to.
+ * Deliberately almost nothing — a single drifting clay form on the canvas. It
+ * says "loading" without claiming a screen that may be replaced immediately.
  */
-function Nav({ view, onNavigate }: { view: View; onNavigate: (view: View) => void }) {
+function BootSplash() {
+  return (
+    <div className="grid min-h-dvh place-items-center">
+      <ClayOrb tone="var(--color-clay-peach)" className="size-16 opacity-80" drift />
+      <span className="sr-only">Loading</span>
+    </div>
+  );
+}
+
+/**
+ * The frame an OAuth return lands in.
+ *
+ * Not the full workspace: a User coming back from Facebook has one thing to
+ * finish, and the sidebar would offer them three ways to abandon it. The brand
+ * stays, so the page is recognizably still the Client's.
+ */
+function CallbackFrame({ branding, children }: { branding: Branding; children: ReactNode }) {
+  return (
+    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-6 py-10">
+      <BrandLockup branding={branding} />
+      <div className="flex flex-1 items-center">
+        <div className="w-full animate-rise">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The signed-in workspace: a persistent rail of destinations beside the screen
+ * being worked in.
+ *
+ * The rail is separated from the canvas by tone and a feathered edge rather
+ * than a ruled border, so the page reads as one continuous surface. Below `lg`
+ * it becomes a bar pinned to the bottom of the viewport, which is where a thumb
+ * already is.
+ */
+function Shell({
+  branding,
+  session,
+  view,
+  onNavigate,
+  onSignOut,
+}: {
+  branding: Branding;
+  session: Session;
+  view: View;
+  onNavigate: (view: View) => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="lg:grid lg:grid-cols-[17.5rem_1fr]">
+      <Sidebar
+        branding={branding}
+        session={session}
+        view={view}
+        onNavigate={onNavigate}
+        onSignOut={onSignOut}
+      />
+
+      <div className="min-w-0">
+        <MobileTopBar branding={branding} session={session} onSignOut={onSignOut} />
+        <main className="px-5 pb-28 pt-6 sm:px-8 lg:px-12 lg:pb-16 lg:pt-12">
+          {/* Keyed on the destination so each screen animates in on arrival —
+              the transition between views is the one place this app can afford
+              motion, and it makes the tab-to-content link legible. */}
+          <div key={view.kind} className="mx-auto w-full max-w-5xl animate-rise">
+            <Workspace session={session} view={view} onNavigate={onNavigate} />
+          </div>
+        </main>
+      </div>
+
+      <MobileNav view={view} onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function Sidebar({
+  branding,
+  session,
+  view,
+  onNavigate,
+  onSignOut,
+}: {
+  branding: Branding;
+  session: Session;
+  view: View;
+  onNavigate: (view: View) => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <aside className="relative hidden lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col lg:bg-[color-mix(in_oklab,var(--color-surface-soft)_72%,transparent)] lg:px-5 lg:py-7">
+      {/* The rail's edge, feathered top and bottom so it never cuts the page. */}
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-0 right-0 w-px bg-gradient-to-b from-transparent via-hairline to-transparent"
+      />
+
+      <div className="px-2">
+        <BrandLockup branding={branding} />
+      </div>
+
+      <nav className="mt-9 flex flex-col gap-1" aria-label="Workspace">
+        <NavItems view={view} onNavigate={onNavigate} withBlurb />
+      </nav>
+
+      <div className="mt-auto pt-8">
+        <AccountCard session={session} onSignOut={onSignOut} />
+      </div>
+    </aside>
+  );
+}
+
+/** The three destinations, shared by the rail and the mobile bar. */
+function NavItems({
+  view,
+  onNavigate,
+  withBlurb = false,
+}: {
+  view: View;
+  onNavigate: (view: View) => void;
+  withBlurb?: boolean;
+}) {
+  // A Post's detail is not a destination — it is reached *from* the Posts list
+  // and keeps that entry lit, because that is where the back button returns to.
   const activeTab = view.kind === "post" ? "posts" : view.kind;
 
   return (
-    <nav style={navStyle}>
+    <>
       {TABS.map((tab) => {
         const active = tab.kind === activeTab;
+        const Icon = tab.icon;
         return (
           <button
             key={tab.kind}
             type="button"
             onClick={() =>
-              onNavigate(tab.kind === "compose" ? { kind: "compose", postId: null } : { kind: tab.kind })
+              onNavigate(
+                tab.kind === "compose" ? { kind: "compose", postId: null } : { kind: tab.kind },
+              )
             }
             aria-current={active ? "page" : undefined}
-            style={{
-              ...tabStyle,
-              color: active ? "var(--brand-primary)" : "#64748b",
-              fontWeight: active ? 600 : 400,
-              borderBottomColor: active ? "var(--brand-primary)" : "transparent",
-            }}
+            className="nav-item"
           >
+            <span className="nav-dot" aria-hidden="true" />
+            <Icon />
+            <span className="flex flex-col">
+              {tab.label}
+              {withBlurb && (
+                <span className="text-note font-normal text-muted">{tab.blurb}</span>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+/** Who is signed in, and the way out. */
+function AccountCard({ session, onSignOut }: { session: Session; onSignOut: () => void }) {
+  return (
+    <div className="card-soft flex items-center gap-3 p-3">
+      <span
+        className="clay-pill grid size-9 shrink-0 place-items-center text-title-sm font-semibold text-white"
+        style={{ ["--orb" as string]: "var(--brand-primary)" }}
+        aria-hidden="true"
+      >
+        {session.user.email.charAt(0).toUpperCase()}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="m-0 truncate text-note font-medium text-ink" title={session.user.email}>
+          {session.user.email}
+        </p>
+        <button type="button" onClick={onSignOut} className="btn-link btn-quiet text-note">
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The brand and the way out, for viewports with no room for a rail. */
+function MobileTopBar({
+  branding,
+  session,
+  onSignOut,
+}: {
+  branding: Branding;
+  session: Session;
+  onSignOut: () => void;
+}) {
+  return (
+    <header className="flex items-center justify-between gap-3 px-5 pt-6 sm:px-8 lg:hidden">
+      <BrandLockup branding={branding} />
+      <button
+        type="button"
+        onClick={onSignOut}
+        className="btn-link btn-quiet"
+        title={session.user.email}
+      >
+        Sign out
+      </button>
+    </header>
+  );
+}
+
+/**
+ * The rail, folded into a bar at the bottom of the viewport. Floating and
+ * rounded rather than a full-width strip with a border across the top — the
+ * same reason nothing else here is separated by a hard line.
+ */
+function MobileNav({ view, onNavigate }: { view: View; onNavigate: (view: View) => void }) {
+  const activeTab = view.kind === "post" ? "posts" : view.kind;
+
+  return (
+    <nav
+      aria-label="Workspace"
+      className="fixed inset-x-4 bottom-4 z-20 flex justify-around gap-1 rounded-xl bg-[color-mix(in_oklab,var(--color-canvas)_88%,#fff)] p-1.5 shadow-clay-lifted backdrop-blur lg:hidden"
+    >
+      {TABS.map((tab) => {
+        const active = tab.kind === activeTab;
+        const Icon = tab.icon;
+        return (
+          <button
+            key={tab.kind}
+            type="button"
+            onClick={() =>
+              onNavigate(
+                tab.kind === "compose" ? { kind: "compose", postId: null } : { kind: tab.kind },
+              )
+            }
+            aria-current={active ? "page" : undefined}
+            className="nav-item flex-1 flex-col justify-center gap-1 px-2 py-2 text-note"
+          >
+            <Icon />
             {tab.label}
           </button>
         );
@@ -286,28 +458,49 @@ function Workspace({
   }
 }
 
-const navStyle = {
-  display: "flex",
-  gap: "1.5rem",
-  marginTop: "1.25rem",
-  borderBottom: "1px solid #e2e8f0",
+/* -------------------------------------------------------------------- Icons */
+
+/**
+ * Drawn inline rather than pulled from an icon set: three icons do not justify
+ * a dependency, and hand-drawing them keeps the stroke weight matched to the
+ * type. All three share a 24px box, a 1.6 stroke, and round joins.
+ */
+const iconProps = {
+  width: 19,
+  height: 19,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.6,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+  className: "shrink-0",
 } as const;
 
-const tabStyle = {
-  padding: "0 0 0.625rem",
-  background: "none",
-  border: "none",
-  borderBottom: "2px solid transparent",
-  fontSize: "0.938rem",
-  cursor: "pointer",
-} as const;
+function ComposeIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M4 20h16" />
+      <path d="M14.5 4.5a2.1 2.1 0 0 1 3 3L9 16l-4 1 1-4Z" />
+    </svg>
+  );
+}
 
-const linkButtonStyle = {
-  background: "none",
-  border: "none",
-  padding: 0,
-  color: "#64748b",
-  fontSize: "0.875rem",
-  textDecoration: "underline",
-  cursor: "pointer",
-} as const;
+function PostsIcon() {
+  return (
+    <svg {...iconProps}>
+      <rect x="3" y="4" width="18" height="6" rx="2" />
+      <rect x="3" y="14" width="18" height="6" rx="2" />
+    </svg>
+  );
+}
+
+function AccountsIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M10 13a4 4 0 0 0 5.7.4l3-3A4 4 0 0 0 13 4.7l-1.4 1.4" />
+      <path d="M14 11a4 4 0 0 0-5.7-.4l-3 3A4 4 0 0 0 11 19.3l1.4-1.4" />
+    </svg>
+  );
+}

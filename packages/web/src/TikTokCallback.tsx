@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ApiError, completeTikTokLogin } from "./api.js";
-import { primaryButtonStyle } from "./LoginScreen.jsx";
+import { ClayOrb, LoadingNote, PlatformTile } from "./ui.jsx";
 
 /**
  * Where a User lands coming back from TikTok.
@@ -53,32 +53,59 @@ export function TikTokCallback({ onDone }: { onDone: () => void }) {
   }, [code, oauthState, denied]);
 
   return (
-    <section style={{ marginTop: "2rem", maxWidth: "34rem" }}>
-      <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>Connect TikTok</h2>
+    <section className="card relative overflow-hidden p-7 sm:p-9">
+      {/* The same corner wash as the Facebook return — the two screens are
+          siblings and should read as a pair. Mint rather than TikTok's own
+          teal: teal is the palette's one dark tone, and a wash of it reads as
+          a smudge rather than warmth. Held flush to the corner so the gradient
+          has reached transparent by the card's edge; pulled beyond it, the
+          card's clip would slice it off mid-fade. */}
+      <span
+        aria-hidden="true"
+        className="clay-wash pointer-events-none absolute right-0 top-0 size-64 opacity-70"
+        style={{ ["--orb" as string]: "var(--color-clay-mint)" }}
+      />
 
-      {state.phase === "connecting" && <p style={muted}>Checking with TikTok…</p>}
-
-      {state.phase === "connected" && (
-        <div>
-          <p>
-            Connected{state.displayName ? <> to <strong>{state.displayName}</strong></> : null}.
-          </p>
-          <button onClick={onDone} style={primaryButtonStyle}>
-            Done
-          </button>
+      <div className="relative">
+        <div className="flex items-center gap-3">
+          <PlatformTile platform="tiktok" />
+          <h2 className="m-0 text-title-lg text-ink">Connect TikTok</h2>
         </div>
-      )}
 
-      {state.phase === "error" && (
-        <div role="alert">
-          <p style={{ color: "#b91c1c" }}>{state.message}</p>
-          <button onClick={onDone} style={primaryButtonStyle}>
-            Back
-          </button>
+        <div className="mt-6">
+          {state.phase === "connecting" && <LoadingNote>Checking with TikTok…</LoadingNote>}
+
+          {state.phase === "connected" && (
+            <div>
+              <div className="flex items-center gap-3">
+                <ClayOrb tone="var(--color-clay-mint)" className="size-9 shrink-0" />
+                <p className="m-0 text-body-md text-ink-strong">
+                  Connected
+                  {state.displayName ? (
+                    <>
+                      {" "}
+                      to <strong>{state.displayName}</strong>
+                    </>
+                  ) : null}
+                  .
+                </p>
+              </div>
+              <button onClick={onDone} className="btn btn-primary mt-6">
+                Done
+              </button>
+            </div>
+          )}
+
+          {state.phase === "error" && (
+            <div role="alert">
+              <p className="callout callout-error m-0">{state.message}</p>
+              <button onClick={onDone} className="btn btn-primary mt-6">
+                Back
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }
-
-const muted = { color: "#64748b" } as const;

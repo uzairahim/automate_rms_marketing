@@ -94,18 +94,22 @@ export const POST_STATUS_LABELS: Record<PostStatus, string> = {
 };
 
 /**
- * The colour a status carries. `partially_published` is amber rather than red on
- * purpose: some Targets did go out, and a successful one is never rolled back
- * because another failed (CONTEXT.md `Target`) — calling that "failed" would
- * misrepresent what is live on the platforms.
+ * The tone a status carries, as the badge class that paints it. Named tones
+ * rather than raw hex so the six statuses share the five treatments defined
+ * once in `index.css`, and so a status keeps its meaning if the palette moves.
+ *
+ * `partially_published` is amber rather than red on purpose: some Targets did go
+ * out, and a successful one is never rolled back because another failed
+ * (CONTEXT.md `Target`) — calling that "failed" would misrepresent what is live
+ * on the platforms.
  */
-export const POST_STATUS_COLORS: Record<PostStatus, string> = {
-  draft: "#64748b",
-  scheduled: "#0369a1",
-  publishing: "#0369a1",
-  published: "#15803d",
-  partially_published: "#b45309",
-  failed: "#b91c1c",
+export const POST_STATUS_TONES: Record<PostStatus, string> = {
+  draft: "badge-draft",
+  scheduled: "badge-progress",
+  publishing: "badge-progress",
+  published: "badge-published",
+  partially_published: "badge-partial",
+  failed: "badge-failed",
 };
 
 export const TARGET_STATUS_LABELS: Record<TargetStatus, string> = {
@@ -114,10 +118,21 @@ export const TARGET_STATUS_LABELS: Record<TargetStatus, string> = {
   failed: "Failed",
 };
 
-export const TARGET_STATUS_COLORS: Record<TargetStatus, string> = {
-  pending: "#0369a1",
-  published: "#15803d",
-  failed: "#b91c1c",
+export const TARGET_STATUS_TONES: Record<TargetStatus, string> = {
+  pending: "badge-progress",
+  published: "badge-published",
+  failed: "badge-failed",
+};
+
+/**
+ * The card color each platform is drawn in, cycled from DESIGN.md's six-color
+ * palette so the three never sit next to each other in the same hue. These are
+ * CSS custom-property values, fed to `--orb` on a clay surface.
+ */
+export const PLATFORM_TONES: Record<Platform, string> = {
+  facebook: "var(--color-clay-lavender)",
+  instagram: "var(--color-clay-pink)",
+  tiktok: "var(--color-clay-teal)",
 };
 
 /** Platform names as they are written on the platforms themselves. */

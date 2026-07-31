@@ -15,13 +15,11 @@ import { formatInZone } from "./timezone.js";
 import {
   EmptyNote,
   ErrorNote,
+  LoadingNote,
   MediaPreview,
   PlatformChip,
   PostStatusBadge,
-  disabledStyle,
-  linkButtonStyle,
-  secondaryButtonStyle,
-  sectionHeadingStyle,
+  SectionHeading,
 } from "./ui.jsx";
 
 /**
@@ -102,60 +100,66 @@ export function Posts({
   }
 
   if (!pending || !history) {
-    return error ? <ErrorNote>{error}</ErrorNote> : <p style={{ color: "#64748b" }}>Loading posts…</p>;
+    return error ? <ErrorNote>{error}</ErrorNote> : <LoadingNote>Loading posts…</LoadingNote>;
   }
 
   return (
-    <div style={{ marginTop: "2rem", maxWidth: "38rem" }}>
+    <div>
       {error && <ErrorNote>{error}</ErrorNote>}
 
       <section>
-        <h2 style={sectionHeadingStyle}>Scheduled and drafts</h2>
+        <SectionHeading eyebrow="Waiting" title="Scheduled and drafts" />
+
         {pending.length === 0 ? (
           <EmptyNote>Nothing waiting. Anything you schedule or save will show up here.</EmptyNote>
         ) : (
-          <ul style={listStyle}>
+          <ul className="m-0 flex list-none flex-col gap-3 p-0">
             {pending.map((post) => (
-              <li key={post.id} style={rowStyle}>
-                <div style={{ display: "flex", alignItems: "baseline", gap: "0.625rem" }}>
+              <li key={post.id} className="card p-5">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <PostStatusBadge status={post.status} />
-                  <span style={timeStyle}>
+                  <span className="text-note text-muted">
                     {post.scheduledAt
                       ? formatInZone(post.scheduledAt, timeZone)
                       : `Saved ${formatInZone(post.updatedAt, timeZone)}`}
                   </span>
                 </div>
 
-                <Excerpt post={post} />
-                <Platforms targets={post.targets} />
+                <div className="mt-3">
+                  <Excerpt post={post} />
+                </div>
 
-                <div style={rowActionsStyle}>
-                  <button
-                    type="button"
-                    onClick={() => onEdit(post.id)}
-                    disabled={busy === post.id}
-                    style={{ ...smallButtonStyle, ...disabledStyle(busy === post.id) }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void publishNow(post.id)}
-                    disabled={busy === post.id}
-                    style={{ ...smallButtonStyle, ...disabledStyle(busy === post.id) }}
-                  >
-                    {busy === post.id ? "Working…" : "Publish now"}
-                  </button>
-                  {post.status === "scheduled" && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <Platforms targets={post.targets} />
+
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => void unschedule(post.id)}
+                      onClick={() => onEdit(post.id)}
                       disabled={busy === post.id}
-                      style={{ ...smallButtonStyle, ...disabledStyle(busy === post.id) }}
+                      className="btn btn-secondary btn-sm"
                     >
-                      Cancel schedule
+                      Edit
                     </button>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => void publishNow(post.id)}
+                      disabled={busy === post.id}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      {busy === post.id ? "Working…" : "Publish now"}
+                    </button>
+                    {post.status === "scheduled" && (
+                      <button
+                        type="button"
+                        onClick={() => void unschedule(post.id)}
+                        disabled={busy === post.id}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        Cancel schedule
+                      </button>
+                    )}
+                  </div>
                 </div>
               </li>
             ))}
@@ -163,36 +167,44 @@ export function Posts({
         )}
       </section>
 
-      <section style={{ marginTop: "2.5rem" }}>
-        <h2 style={sectionHeadingStyle}>History</h2>
+      <section className="mt-14">
+        <SectionHeading eyebrow="Sent" title="History" />
+
         {history.length === 0 ? (
           <EmptyNote>Nothing published yet.</EmptyNote>
         ) : (
-          <ul style={listStyle}>
+          <ul className="m-0 flex list-none flex-col gap-3 p-0">
             {history.map((post) => (
-              <li key={post.id} style={rowStyle}>
-                <div style={{ display: "flex", gap: "0.875rem" }}>
+              <li key={post.id} className="card p-5">
+                <div className="flex gap-4">
                   {/* Fetched live from the platform, and null whenever it cannot be
                       (ADR 0003) — so the row is built to read without it. */}
                   {post.thumbnailUrl && (
-                    <MediaPreview url={post.thumbnailUrl} type="image" size="4rem" />
+                    <MediaPreview url={post.thumbnailUrl} type="image" size="4.5rem" />
                   )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: "0.625rem" }}>
-                      <PostStatusBadge status={post.status} />
-                      <span style={timeStyle}>{formatInZone(post.createdAt, timeZone)}</span>
-                    </div>
-                    <Excerpt post={post} />
-                    <Platforms targets={post.targets} />
-                  </div>
-                </div>
 
-                <div style={rowActionsStyle}>
-                  <button type="button" onClick={() => onOpen(post.id)} style={linkButtonStyle}>
-                    {/* Named for what is behind it, since the reason to open a
-                        Post differs by status: a failure to fix, or numbers. */}
-                    {post.status === "published" ? "View results" : "View and retry"}
-                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <PostStatusBadge status={post.status} />
+                      <span className="text-note text-muted">
+                        {formatInZone(post.createdAt, timeZone)}
+                      </span>
+                    </div>
+
+                    <div className="mt-3">
+                      <Excerpt post={post} />
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                      <Platforms targets={post.targets} />
+                      <button type="button" onClick={() => onOpen(post.id)} className="btn-link">
+                        {/* Named for what is behind it, since the reason to open a
+                            Post differs by status: a failure to fix, or numbers. */}
+                        {post.status === "published" ? "View results" : "View and retry"}
+                        <span aria-hidden="true">→</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </li>
             ))}
@@ -207,65 +219,24 @@ export function Posts({
 function Excerpt({ post }: { post: Post }) {
   if (!post.text) {
     return (
-      <p style={{ ...excerptStyle, color: "#94a3b8", fontStyle: "italic" }}>
+      <p className="m-0 text-body-sm italic text-faint">
         {post.media ? "Media only, no text" : "Empty"}
       </p>
     );
   }
-  return <p style={excerptStyle}>{post.text}</p>;
+  return <p className="m-0 line-clamp-2 text-body-md text-ink-strong">{post.text}</p>;
 }
 
 /** The platforms a Post fans out to. Empty is worth saying — it cannot be sent. */
 function Platforms({ targets }: { targets: PostTarget[] }) {
   if (targets.length === 0) {
-    return <p style={{ ...timeStyle, margin: 0 }}>No platforms selected yet</p>;
+    return <p className="m-0 text-note text-muted">No platforms selected yet</p>;
   }
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.375rem" }}>
+    <div className="flex flex-wrap gap-1.5">
       {targets.map((target) => (
         <PlatformChip key={target.platform} platform={target.platform} />
       ))}
     </div>
   );
 }
-
-const listStyle = {
-  listStyle: "none",
-  padding: 0,
-  margin: 0,
-} as const;
-
-const rowStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.5rem",
-  padding: "1rem 0",
-  borderBottom: "1px solid #e2e8f0",
-} as const;
-
-const rowActionsStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "0.625rem",
-} as const;
-
-const smallButtonStyle = {
-  ...secondaryButtonStyle,
-  padding: "0.25rem 0.75rem",
-  fontSize: "0.875rem",
-} as const;
-
-const excerptStyle = {
-  margin: 0,
-  fontSize: "0.938rem",
-  color: "#1e293b",
-  display: "-webkit-box",
-  WebkitLineClamp: 2,
-  WebkitBoxOrient: "vertical",
-  overflow: "hidden",
-} as const;
-
-const timeStyle = {
-  fontSize: "0.813rem",
-  color: "#64748b",
-} as const;

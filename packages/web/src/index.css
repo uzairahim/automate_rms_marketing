@@ -1,0 +1,770 @@
+@import "tailwindcss";
+
+/**
+ * The Clay design system, as this app's theme.
+ *
+ * Tailwind v4 takes its configuration from CSS rather than a JS config file, so
+ * this `@theme` block *is* the design system: every token below is lifted from
+ * DESIGN.md and becomes a utility (`bg-canvas`, `rounded-xl`, `text-display-lg`).
+ * Token names are kept recognizable against DESIGN.md; where a name would have
+ * collided with a Tailwind namespace it is renamed and the original noted.
+ *
+ * The one token that is *not* fixed is the brand accent. This app is
+ * white-label: a Client's `primaryColor` arrives from `/api/branding` at runtime
+ * and is written to `--brand-primary`. Clay supplies the chassis — cream canvas,
+ * near-black CTAs, the six saturated card colors — and the Client's own color
+ * supplies the accent layer on top of it.
+ */
+@theme {
+  /* Surfaces — the cream canvas is the system's non-negotiable floor. */
+  --color-canvas: #fffaf0;
+  --color-surface-soft: #faf5e8;
+  --color-surface-card: #f5f0e0;
+  --color-surface-strong: #ebe6d6;
+  --color-surface-dark: #0a1a1a;
+  --color-surface-dark-elevated: #1a2a2a;
+
+  /* Ink. DESIGN.md calls these ink / body-strong / body / muted / muted-soft;
+     `body` and `caption` are renamed here so they cannot collide with
+     Tailwind's `text-*` font-size namespace. */
+  --color-ink: #0a0a0a;
+  --color-ink-strong: #1a1a1a;
+  --color-prose: #3a3a3a;
+  --color-muted: #6a6a6a;
+  --color-faint: #9a9a9a;
+
+  --color-hairline: #e5e5e5;
+  --color-hairline-soft: #f0f0f0;
+
+  /* The primary CTA color. Fixed near-black, per DESIGN.md — deliberately not
+     the Client's accent, which lives on the layer above. */
+  --color-primary: #0a0a0a;
+  --color-primary-active: #1f1f1f;
+
+  /* The six saturated card colors, plus the two illustration accents. Cycled
+     across a page, never repeated back to back. */
+  --color-clay-pink: #ff4d8b;
+  --color-clay-teal: #1a3a3a;
+  --color-clay-lavender: #b8a4ed;
+  --color-clay-peach: #ffb084;
+  --color-clay-ochre: #e8b94a;
+  --color-clay-mint: #a4d4c5;
+  --color-clay-coral: #ff6b5a;
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+
+  /* The Client's accent, resolved at runtime. Declaring it here is what makes
+     `text-brand`, `bg-brand`, `border-brand` and `ring-brand` exist; the actual
+     value is inherited from wherever `--brand-primary` is set, so a Client's
+     color reaches every one of them without threading a prop. */
+  --color-brand: var(--brand-primary);
+
+  --font-sans:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* DESIGN.md's display face (Plain Black) is licensed to Clay. Inter at 500
+     with negative letter-spacing is the substitute it names. */
+  --font-display:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --text-display-xl: 4.5rem;
+  --text-display-xl--line-height: 1;
+  --text-display-xl--letter-spacing: -2.5px;
+  --text-display-xl--font-weight: 500;
+
+  --text-display-lg: 3.5rem;
+  --text-display-lg--line-height: 1.05;
+  --text-display-lg--letter-spacing: -2px;
+  --text-display-lg--font-weight: 500;
+
+  --text-display-md: 2.5rem;
+  --text-display-md--line-height: 1.1;
+  --text-display-md--letter-spacing: -1px;
+  --text-display-md--font-weight: 500;
+
+  --text-display-sm: 2rem;
+  --text-display-sm--line-height: 1.15;
+  --text-display-sm--letter-spacing: -0.5px;
+  --text-display-sm--font-weight: 500;
+
+  --text-title-lg: 1.5rem;
+  --text-title-lg--line-height: 1.3;
+  --text-title-lg--letter-spacing: -0.3px;
+  --text-title-lg--font-weight: 600;
+
+  --text-title-md: 1.125rem;
+  --text-title-md--line-height: 1.4;
+  --text-title-md--font-weight: 600;
+
+  --text-title-sm: 1rem;
+  --text-title-sm--line-height: 1.4;
+  --text-title-sm--font-weight: 600;
+
+  --text-body-md: 1rem;
+  --text-body-md--line-height: 1.55;
+
+  --text-body-sm: 0.875rem;
+  --text-body-sm--line-height: 1.55;
+
+  --text-note: 0.8125rem;
+  --text-note--line-height: 1.4;
+  --text-note--font-weight: 500;
+
+  --text-overline: 0.75rem;
+  --text-overline--line-height: 1.4;
+  --text-overline--letter-spacing: 1.5px;
+  --text-overline--font-weight: 600;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+
+  /* Depth is warm and low-contrast: the shadow is tinted toward the cream
+     canvas rather than neutral black, so nothing looks cut out of the page. */
+  --shadow-clay:
+    0 1px 2px rgb(74 56 28 / 0.04), 0 10px 28px -14px rgb(74 56 28 / 0.12);
+  --shadow-clay-lifted:
+    0 2px 4px rgb(74 56 28 / 0.05), 0 22px 48px -20px rgb(74 56 28 / 0.2);
+  --shadow-clay-inset: inset 0 1px 0 rgb(255 255 255 / 0.7);
+
+  --ease-clay: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-rise: rise 0.5s var(--ease-clay) both;
+  --animate-breathe: breathe 14s ease-in-out infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Orbs drift rather than pulse — slow enough to read as ambient, never as a
+   loading state. */
+@keyframes breathe {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -14px, 0) scale(1.04);
+  }
+}
+
+:root {
+  /* The neutral fallback, matching the server's DEFAULT_BRANDING. App.tsx
+     overwrites this with the Client's own color once branding resolves. */
+  --brand-primary: #334155;
+
+  /* Accent derivations. `color-mix` keeps every one of these correct for
+     whatever color a Client picks, instead of shipping a fixed tint that only
+     suits the default. */
+  --brand-wash: color-mix(in oklab, var(--brand-primary) 7%, var(--color-canvas));
+  --brand-tint: color-mix(in oklab, var(--brand-primary) 13%, var(--color-canvas));
+  --brand-edge: color-mix(in oklab, var(--brand-primary) 26%, var(--color-canvas));
+  --brand-deep: color-mix(in oklab, var(--brand-primary) 82%, #000);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-prose);
+    font-family: var(--font-sans);
+    font-size: var(--text-body-md);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100dvh;
+  }
+
+  /**
+   * The ambient wash.
+   *
+   * This is what keeps the page from reading as stacked blocks: three very low
+   * alpha color fields bleed into the cream canvas behind everything, so the
+   * background is continuously graded instead of flat. Sections can then be
+   * separated by tone and space rather than by ruled lines.
+   */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        60rem 40rem at 12% -8%,
+        color-mix(in oklab, var(--color-clay-peach) 26%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        48rem 36rem at 92% 4%,
+        color-mix(in oklab, var(--color-clay-lavender) 22%, transparent),
+        transparent 68%
+      ),
+      radial-gradient(
+        56rem 44rem at 70% 100%,
+        color-mix(in oklab, var(--color-clay-mint) 20%, transparent),
+        transparent 70%
+      );
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--color-ink);
+    font-family: var(--font-display);
+    font-weight: 500;
+    text-wrap: balance;
+  }
+
+  /* One focus treatment for the whole app, in the Client's own color. */
+  :focus-visible {
+    outline: 2px solid var(--brand-primary);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  ::selection {
+    background: var(--brand-tint);
+    color: var(--color-ink);
+  }
+
+  ::placeholder {
+    color: var(--color-faint);
+  }
+
+  /* Scrollbars in the system's own palette rather than the browser's gray. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-surface-strong) transparent;
+  }
+}
+
+@layer components {
+  /* ---------------------------------------------------------------- Buttons */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.75rem;
+    padding: 0 1.25rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      transform 0.18s var(--ease-clay),
+      background-color 0.18s var(--ease-clay),
+      border-color 0.18s var(--ease-clay),
+      box-shadow 0.18s var(--ease-clay),
+      color 0.18s var(--ease-clay);
+  }
+
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  .btn:disabled {
+    cursor: not-allowed;
+  }
+
+  /* Near-black, per DESIGN.md — the primary CTA is Clay's, not the Client's. */
+  .btn-primary {
+    background: var(--color-primary, #0a0a0a);
+    color: #fff;
+    box-shadow: var(--shadow-clay);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: #1f1f1f;
+    box-shadow: var(--shadow-clay-lifted);
+  }
+
+  .btn-primary:disabled {
+    background: #e5e5e5;
+    color: var(--color-muted);
+    box-shadow: none;
+  }
+
+  .btn-secondary {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    border-color: var(--color-hairline);
+    box-shadow: var(--shadow-clay-inset);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--color-surface-soft);
+    border-color: var(--color-ink);
+  }
+
+  .btn-secondary:disabled {
+    color: var(--color-faint);
+    border-color: var(--color-hairline-soft);
+  }
+
+  /* White on a saturated card, so a CTA stays legible over pink or teal. */
+  .btn-on-color {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+  }
+
+  .btn-on-color:hover:not(:disabled) {
+    background: #fff;
+    box-shadow: var(--shadow-clay-lifted);
+  }
+
+  .btn-sm {
+    height: 2.125rem;
+    padding: 0 0.875rem;
+    font-size: 0.8125rem;
+    border-radius: var(--radius-sm);
+  }
+
+  /* A text button that still carries the Client's accent. */
+  .btn-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--brand-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: opacity 0.18s var(--ease-clay);
+  }
+
+  .btn-link:hover:not(:disabled) {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .btn-link:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .btn-quiet {
+    color: var(--color-muted);
+  }
+
+  /* ----------------------------------------------------------------- Fields */
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4375rem;
+  }
+
+  .field-label {
+    font-size: var(--text-note);
+    font-weight: 600;
+    color: var(--color-ink-strong);
+  }
+
+  .field-hint {
+    font-size: var(--text-note);
+    color: var(--color-muted);
+  }
+
+  .input {
+    width: 100%;
+    min-height: 2.75rem;
+    padding: 0.6875rem 0.875rem;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: var(--text-body-md);
+    box-shadow: var(--shadow-clay-inset);
+    transition:
+      border-color 0.18s var(--ease-clay),
+      box-shadow 0.18s var(--ease-clay);
+  }
+
+  .input:hover:not(:disabled) {
+    border-color: var(--color-faint);
+  }
+
+  .input:focus {
+    outline: none;
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 4px var(--brand-tint);
+  }
+
+  /**
+   * A real `input[type=checkbox]`, restyled rather than replaced — so it keeps
+   * its keyboard behaviour, its label association, and its place in the
+   * accessibility tree. Checked, it fills with the Client's own accent.
+   */
+  .checkbox {
+    appearance: none;
+    display: grid;
+    place-content: center;
+    flex-shrink: 0;
+    width: 1.1875rem;
+    height: 1.1875rem;
+    margin: 0;
+    background: var(--color-canvas);
+    border: 1.5px solid var(--color-hairline);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    transition:
+      background-color 0.18s var(--ease-clay),
+      border-color 0.18s var(--ease-clay);
+  }
+
+  .checkbox::after {
+    content: "";
+    width: 0.625rem;
+    height: 0.625rem;
+    background: #fff;
+    transform: scale(0);
+    transition: transform 0.18s var(--ease-clay);
+    clip-path: polygon(14% 44%, 0 60%, 39% 100%, 100% 16%, 84% 0, 39% 68%);
+  }
+
+  .checkbox:hover:not(:disabled) {
+    border-color: var(--color-faint);
+  }
+
+  .checkbox:checked {
+    background: var(--brand-primary);
+    border-color: var(--brand-primary);
+  }
+
+  .checkbox:checked::after {
+    transform: scale(1);
+  }
+
+  /**
+   * A row that can be picked — a platform to publish to, a Page to connect.
+   * Selection is carried by a tinted fill and the Client's accent on the edge,
+   * so the state is legible without a checkbox being the only signal.
+   */
+  .pick-row {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    width: 100%;
+    padding: 0.875rem 1rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition:
+      background-color 0.2s var(--ease-clay),
+      border-color 0.2s var(--ease-clay);
+  }
+
+  .pick-row:hover {
+    background: color-mix(in oklab, var(--color-surface-card) 45%, transparent);
+  }
+
+  .pick-row[data-selected="true"] {
+    background: var(--brand-wash);
+    border-color: var(--brand-edge);
+  }
+
+  /* ------------------------------------------------------------ Containers */
+
+  /**
+   * The default content surface. No hairline border: a card is separated from
+   * the canvas by its own soft warmth and a low shadow, which is what keeps
+   * the page from reading as a set of boxed-off sections.
+   */
+  .card {
+    background: color-mix(in oklab, var(--color-canvas) 70%, #fff);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-clay);
+  }
+
+  .card-soft {
+    background: color-mix(in oklab, var(--color-surface-soft) 62%, transparent);
+    border-radius: var(--radius-lg);
+  }
+
+  .card-feature {
+    border-radius: var(--radius-xl);
+    padding: 2rem;
+    box-shadow: var(--shadow-clay);
+  }
+
+  /**
+   * A feathered divider.
+   *
+   * Where two rows genuinely need separating, the rule fades out at both ends
+   * instead of running edge to edge — a hard 1px line across the full width is
+   * exactly the "section cut" this design avoids.
+   */
+  .rule-soft {
+    height: 1px;
+    border: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-hairline) 12%,
+      var(--color-hairline) 88%,
+      transparent
+    );
+  }
+
+  /* The same feathering, applied between every child of a list. */
+  .divide-soft > * + * {
+    position: relative;
+  }
+
+  .divide-soft > * + *::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-hairline) 10%,
+      var(--color-hairline) 90%,
+      transparent
+    );
+  }
+
+  /* --------------------------------------------------------------- Chrome */
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.1875rem 0.625rem;
+    border-radius: var(--radius-md);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /**
+   * Status tones. Each is a tinted fill rather than bare colored text, so a
+   * status reads at a glance down a list; every one is mixed into the cream
+   * canvas so it stays inside the system's warmth instead of arriving as a
+   * stock semantic color.
+   */
+  .badge-draft {
+    background: var(--color-surface-card);
+    color: var(--color-muted);
+  }
+
+  .badge-progress {
+    background: color-mix(in oklab, var(--color-clay-lavender) 30%, var(--color-canvas));
+    color: #4a3a7a;
+  }
+
+  .badge-published {
+    background: color-mix(in oklab, var(--color-success) 18%, var(--color-canvas));
+    color: #15683c;
+  }
+
+  /* Amber, not red: some Targets did publish, and a success is never rolled
+     back because a sibling failed. Calling that "failed" would misrepresent
+     what is actually live on the platforms. */
+  .badge-partial {
+    background: color-mix(in oklab, var(--color-clay-ochre) 34%, var(--color-canvas));
+    color: #85560a;
+  }
+
+  .badge-failed {
+    background: color-mix(in oklab, var(--color-error) 15%, var(--color-canvas));
+    color: #a72020;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.25rem 0.625rem;
+    background: var(--color-surface-card);
+    border-radius: 9999px;
+    font-size: var(--text-note);
+    font-weight: 500;
+    color: var(--color-ink-strong);
+  }
+
+  /* The sidebar's destinations. Active is the Client's accent — a tinted pill
+     rather than an underline, so nothing is cut by a line. */
+  .nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.6875rem 0.875rem;
+    background: none;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--color-muted);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background-color 0.2s var(--ease-clay),
+      color 0.2s var(--ease-clay);
+  }
+
+  .nav-item:hover {
+    background: color-mix(in oklab, var(--color-surface-card) 60%, transparent);
+    color: var(--color-ink);
+  }
+
+  .nav-item[aria-current="page"] {
+    background: var(--brand-tint);
+    color: var(--brand-deep);
+    font-weight: 600;
+  }
+
+  .nav-item[aria-current="page"] .nav-dot {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  /* Sits just inside the pill's own padding. Outside it, in the rail's
+     margin, it reads as a stray mark rather than part of the item. */
+  .nav-dot {
+    position: absolute;
+    left: 0.375rem;
+    width: 3px;
+    height: 1.25rem;
+    border-radius: 9999px;
+    background: var(--brand-primary);
+    opacity: 0;
+    transform: scale(0.4);
+    transition: all 0.25s var(--ease-clay);
+  }
+
+  /* A callout that guides rather than alarms — used for the Instagram
+     dead-end and the purged-media notice. */
+  .callout {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1.125rem 1.25rem;
+    background: color-mix(in oklab, var(--color-clay-ochre) 14%, var(--color-canvas));
+    border-radius: var(--radius-lg);
+    font-size: var(--text-body-sm);
+    color: var(--color-ink-strong);
+  }
+
+  .callout-error {
+    background: color-mix(in oklab, var(--color-error) 9%, var(--color-canvas));
+  }
+}
+
+/* ------------------------------------------------------------- Clay shapes */
+
+/**
+ * The modeled-clay surface, in CSS.
+ *
+ * DESIGN.md's most-recognized element is commissioned 3D claymation art, which
+ * cannot ship as a token. This approximates its read — a lit top-left, a
+ * shadowed underside, and a soft cast shadow — from a single `--orb` color, so
+ * any of the six brand colors can be modeled without an asset.
+ */
+.clay-orb {
+  --orb: var(--color-clay-peach);
+  border-radius: 62% 38% 46% 54% / 58% 44% 56% 42%;
+  background: radial-gradient(
+    120% 120% at 30% 22%,
+    color-mix(in oklab, var(--orb) 62%, #fff) 0%,
+    var(--orb) 48%,
+    color-mix(in oklab, var(--orb) 76%, #3a2a14) 100%
+  );
+  box-shadow:
+    inset -10px -14px 28px color-mix(in oklab, var(--orb) 62%, #2a1c08),
+    inset 12px 16px 30px color-mix(in oklab, var(--orb) 45%, #fff),
+    0 24px 48px -24px rgb(74 56 28 / 0.55);
+}
+
+/* A second silhouette, so two orbs side by side do not read as copies. */
+.clay-orb-alt {
+  border-radius: 42% 58% 63% 37% / 47% 62% 38% 53%;
+}
+
+.clay-pill {
+  --orb: var(--color-clay-lavender);
+  border-radius: 9999px;
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklab, var(--orb) 55%, #fff),
+    var(--orb) 55%,
+    color-mix(in oklab, var(--orb) 78%, #3a2a14)
+  );
+  box-shadow:
+    inset 0 2px 6px color-mix(in oklab, var(--orb) 40%, #fff),
+    inset 0 -6px 12px color-mix(in oklab, var(--orb) 68%, #2a1c08),
+    0 10px 24px -12px rgb(74 56 28 / 0.4);
+}
+
+/* A soft field of color that fades to nothing — used to warm a panel's corner
+   without drawing an edge anywhere. */
+.clay-wash {
+  --orb: var(--color-clay-peach);
+  background: radial-gradient(
+    closest-side,
+    color-mix(in oklab, var(--orb) 42%, transparent),
+    transparent
+  );
+  filter: blur(2px);
+}
+
+.animate-delay-1 {
+  animation-delay: 0.06s;
+}
+.animate-delay-2 {
+  animation-delay: 0.12s;
+}
+.animate-delay-3 {
+  animation-delay: 0.18s;
+}
+.animate-delay-4 {
+  animation-delay: 0.24s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

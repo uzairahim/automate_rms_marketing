@@ -13,20 +13,15 @@ import {
   type Platform,
   type Post,
 } from "./api.js";
-import { primaryButtonStyle } from "./LoginScreen.jsx";
 import { blockingReasons, PLATFORM_LABELS } from "./postRules.js";
 import type { Session } from "./session.js";
 import { nowInZoneInput, utcToZonedInput, zonedToUtc, zoneAbbreviation } from "./timezone.js";
 import {
   ErrorNote,
+  LoadingNote,
   MediaPreview,
-  cardStyle,
-  fieldLabelStyle,
-  inputStyle,
-  disabledStyle,
-  linkButtonStyle,
-  secondaryButtonStyle,
-  sectionHeadingStyle,
+  PlatformTile,
+  SectionHeading,
 } from "./ui.jsx";
 
 /**
@@ -36,7 +31,9 @@ import {
  * The screen is built around the one thing that makes this app not three apps:
  * a single body of content, a single attachment, and a *set* of destinations —
  * so the text area is the page and the platforms are checkboxes beside it, not
- * three tabs to fill in separately.
+ * three tabs to fill in separately. The two-column layout says the same thing
+ * spatially: what you are writing on the left, where it is going on the right,
+ * both visible at once.
  *
  * Three outcomes come off the same form, because they differ only in when:
  * publish now, schedule, or save as a Draft. A Draft is the one that is never
@@ -255,7 +252,7 @@ export function Composer({
   }
 
   if (loadingPost || !connections) {
-    return <p style={{ color: "#64748b" }}>Loading composer…</p>;
+    return <LoadingNote>Loading composer…</LoadingNote>;
   }
 
   const blocking = blockingReasons(selected, media, connections);
@@ -268,151 +265,192 @@ export function Composer({
   const working = busy !== null;
 
   return (
-    <section style={{ marginTop: "2rem", maxWidth: "38rem" }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: "1rem" }}>
-        <h2 style={sectionHeadingStyle}>
-          {editing ? (editing.status === "scheduled" ? "Edit scheduled post" : "Finish draft") : "New post"}
-        </h2>
+    <section>
+      <SectionHeading
+        eyebrow={editing ? "Editing" : "Compose"}
+        title={
+          editing
+            ? editing.status === "scheduled"
+              ? "Edit scheduled post"
+              : "Finish draft"
+            : "New post"
+        }
+      >
         {editing && (
-          <button type="button" onClick={onLeaveEdit} style={linkButtonStyle}>
+          <button type="button" onClick={onLeaveEdit} className="btn-link btn-quiet">
             Discard changes
           </button>
         )}
-      </div>
+      </SectionHeading>
 
-      <label style={{ ...fieldLabelStyle, marginBottom: "1rem" }}>
-        Post text
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={6}
-          placeholder="Write once — it goes to every platform you pick below."
-          style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
-        />
-      </label>
-
-      <MediaField
-        media={media}
-        uploading={busy === "upload"}
-        inputRef={fileInput}
-        onPick={pickFile}
-        onChosen={onFileChosen}
-        onRemove={() => setMedia(null)}
-      />
-
-      <fieldset style={fieldsetStyle}>
-        <legend style={legendStyle}>Publish to</legend>
-        {connections.length === 0 ? (
-          <p style={{ color: "#64748b", fontSize: "0.875rem", margin: 0 }}>
-            No platforms are available on this plan yet.
-          </p>
-        ) : (
-          connections.map((connection) => {
-            const isSelected = selected.includes(connection.platform);
-            const reason = isSelected ? reasonFor(connection.platform) : null;
-            return (
-              <div key={connection.platform} style={{ padding: "0.375rem 0" }}>
-                <label style={checkboxRowStyle}>
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => togglePlatform(connection.platform)}
-                  />
-                  <span>{PLATFORM_LABELS[connection.platform]}</span>
-                  {connection.status === "connected" && connection.displayName && (
-                    <span style={{ color: "#64748b", fontSize: "0.813rem" }}>
-                      {connection.displayName}
-                    </span>
-                  )}
-                </label>
-                {/* The reason sits on the platform it is about, so a User reading
-                    "TikTok requires a video" is looking at the TikTok row. */}
-                {reason && <p style={reasonStyle}>{reason}</p>}
-              </div>
-            );
-          })
-        )}
-      </fieldset>
-
-      <div style={{ ...cardStyle, marginTop: "1rem" }}>
-        <label style={checkboxRowStyle}>
-          <input
-            type="checkbox"
-            checked={scheduling}
-            onChange={(e) => setScheduling(e.target.checked)}
-          />
-          <span>Schedule for later</span>
-        </label>
-
-        {scheduling && (
-          <label style={{ ...fieldLabelStyle, marginTop: "0.75rem" }}>
-            {/* The zone is named, because it is the Client's and not the
-                browser's: the same wall-clock time means different instants to a
-                User travelling, and guessing wrong publishes at the wrong hour. */}
-            Date and time ({timeZone} · {zoneAbbreviation(timeZone)})
-            <input
-              type="datetime-local"
-              value={scheduleAt}
-              min={nowInZoneInput(timeZone)}
-              onChange={(e) => setScheduleAt(e.target.value)}
-              style={inputStyle}
+      <div className="grid items-start gap-5 lg:grid-cols-[1.35fr_1fr]">
+        {/* What is being written. Given the wider column because it is the
+            thing being made; everything on the right is a decision about it. */}
+        <div className="card overflow-hidden">
+          <label className="block px-5 pt-5">
+            <span className="field-label">Post text</span>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={9}
+              placeholder="Write once — it goes to every platform you pick."
+              // Borderless so the card itself reads as the sheet being written
+              // on, but the focus ring is deliberately left alone: the base
+              // `:focus-visible` outline is the only thing telling a keyboard
+              // User where they are.
+              className="mt-2 w-full resize-y rounded-md bg-transparent text-body-md text-ink placeholder:text-faint"
             />
           </label>
-        )}
-      </div>
 
-      {error && <ErrorNote>{error}</ErrorNote>}
+          <hr className="rule-soft mx-5" />
 
-      {nothingSelected && (
-        <p style={{ ...reasonStyle, marginTop: "0.75rem" }}>
-          Pick at least one platform to publish or schedule. You can still save a draft.
-        </p>
-      )}
+          <MediaField
+            media={media}
+            uploading={busy === "upload"}
+            inputRef={fileInput}
+            onPick={pickFile}
+            onChosen={onFileChosen}
+            onRemove={() => setMedia(null)}
+          />
+        </div>
 
-      <div style={actionsStyle}>
-        {scheduling ? (
-          <button
-            type="button"
-            onClick={schedule}
-            disabled={working || sendBlocked || scheduleMissing}
-            style={{
-              ...primaryButtonStyle,
-              marginTop: 0,
-              ...disabledStyle(working || sendBlocked || scheduleMissing),
-            }}
-          >
-            {busy === "schedule" ? "Scheduling…" : editing ? "Save schedule" : "Schedule"}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={publishNow}
-            disabled={working || sendBlocked}
-            style={{ ...primaryButtonStyle, marginTop: 0, ...disabledStyle(working || sendBlocked) }}
-          >
-            {busy === "publish" ? "Publishing…" : "Publish now"}
-          </button>
-        )}
+        {/* Where it goes, and when. */}
+        <div className="flex flex-col gap-5">
+          {/* A browser places a `legend` at the fieldset's top *border* edge,
+              above its padding — so the padding is moved onto the legend
+              itself, else the label sits on the card's edge. */}
+          <fieldset className="card m-0 border-0 px-5 pb-5 pt-0">
+            <legend className="block p-0 pt-5 text-overline uppercase text-muted">
+              Publish to
+            </legend>
 
-        <button
-          type="button"
-          onClick={saveDraft}
-          disabled={working}
-          style={{ ...secondaryButtonStyle, ...disabledStyle(working) }}
-        >
-          {busy === "draft" ? "Saving…" : "Save as draft"}
-        </button>
+            {connections.length === 0 ? (
+              <p className="m-0 mt-3 text-body-sm text-muted">
+                No platforms are available on this plan yet.
+              </p>
+            ) : (
+              <div className="mt-3 flex flex-col gap-1">
+                {connections.map((connection) => {
+                  const isSelected = selected.includes(connection.platform);
+                  const reason = isSelected ? reasonFor(connection.platform) : null;
+                  return (
+                    <div key={connection.platform}>
+                      <label className="pick-row" data-selected={isSelected}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => togglePlatform(connection.platform)}
+                          className="checkbox"
+                        />
+                        <PlatformTile platform={connection.platform} size="sm" />
+                        <span className="flex min-w-0 flex-col">
+                          <span className="text-title-sm text-ink">
+                            {PLATFORM_LABELS[connection.platform]}
+                          </span>
+                          {connection.status === "connected" && connection.displayName && (
+                            <span className="truncate text-note text-muted">
+                              {connection.displayName}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                      {/* The reason sits on the platform it is about, so a User reading
+                          "TikTok requires a video" is looking at the TikTok row. */}
+                      {reason && (
+                        <p className="m-0 mb-1 ml-[3.75rem] mt-1 text-note text-[#85560a]">
+                          {reason}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </fieldset>
 
-        {editing?.status === "scheduled" && (
-          <button
-            type="button"
-            onClick={cancelSchedule}
-            disabled={working}
-            style={{ ...secondaryButtonStyle, ...disabledStyle(working) }}
-          >
-            {busy === "cancel" ? "Cancelling…" : "Cancel schedule"}
-          </button>
-        )}
+          <div className="card p-5">
+            <label className="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={scheduling}
+                onChange={(e) => setScheduling(e.target.checked)}
+                className="checkbox"
+              />
+              <span className="text-title-sm text-ink">Schedule for later</span>
+            </label>
+
+            {scheduling && (
+              <label className="field mt-4 animate-rise">
+                {/* The zone is named, because it is the Client's and not the
+                    browser's: the same wall-clock time means different instants to a
+                    User travelling, and guessing wrong publishes at the wrong hour. */}
+                <span className="field-label">
+                  Date and time
+                  <span className="ml-1.5 font-normal text-muted">
+                    {timeZone} · {zoneAbbreviation(timeZone)}
+                  </span>
+                </span>
+                <input
+                  type="datetime-local"
+                  value={scheduleAt}
+                  min={nowInZoneInput(timeZone)}
+                  onChange={(e) => setScheduleAt(e.target.value)}
+                  className="input"
+                />
+              </label>
+            )}
+          </div>
+
+          {error && <ErrorNote>{error}</ErrorNote>}
+
+          {nothingSelected && (
+            <p className="m-0 text-note text-muted">
+              Pick at least one platform to publish or schedule. You can still save a draft.
+            </p>
+          )}
+
+          <div className="flex flex-wrap gap-2.5">
+            {scheduling ? (
+              <button
+                type="button"
+                onClick={schedule}
+                disabled={working || sendBlocked || scheduleMissing}
+                className="btn btn-primary"
+              >
+                {busy === "schedule" ? "Scheduling…" : editing ? "Save schedule" : "Schedule"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={publishNow}
+                disabled={working || sendBlocked}
+                className="btn btn-primary"
+              >
+                {busy === "publish" ? "Publishing…" : "Publish now"}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={saveDraft}
+              disabled={working}
+              className="btn btn-secondary"
+            >
+              {busy === "draft" ? "Saving…" : "Save as draft"}
+            </button>
+
+            {editing?.status === "scheduled" && (
+              <button
+                type="button"
+                onClick={cancelSchedule}
+                disabled={working}
+                className="btn btn-secondary"
+              >
+                {busy === "cancel" ? "Cancelling…" : "Cancel schedule"}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -440,33 +478,51 @@ function MediaField({
   onRemove: () => void;
 }) {
   return (
-    <div style={cardStyle}>
-      <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-        {media && <MediaPreview url={media.url} type={media.type} />}
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-          <strong style={{ fontSize: "0.875rem" }}>
-            {media ? (media.type === "video" ? "Video attached" : "Image attached") : "No media"}
-          </strong>
-          <div style={{ display: "flex", gap: "0.75rem" }}>
+    <div className="flex items-center gap-4 p-5">
+      {media ? (
+        <MediaPreview url={media.url} type={media.type} size="4.5rem" />
+      ) : (
+        // An empty slot rather than nothing, so the field has the same shape
+        // whether or not something is attached and the row never jumps.
+        <span
+          aria-hidden="true"
+          className="grid size-[4.5rem] shrink-0 place-items-center rounded-lg bg-surface-card text-faint"
+        >
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="3" y="4" width="18" height="16" rx="3" />
+            <circle cx="9" cy="10" r="1.6" />
+            <path d="m4 17 4.5-4.5a2 2 0 0 1 2.8 0L20 20" />
+          </svg>
+        </span>
+      )}
+
+      <div className="flex flex-col gap-1.5">
+        <strong className="text-title-sm text-ink">
+          {media ? (media.type === "video" ? "Video attached" : "Image attached") : "No media"}
+        </strong>
+        <div className="flex flex-wrap gap-4">
+          <button type="button" onClick={onPick} disabled={uploading} className="btn-link">
+            {uploading ? "Uploading…" : media ? "Replace" : "Attach image or video"}
+          </button>
+          {media && (
             <button
               type="button"
-              onClick={onPick}
+              onClick={onRemove}
               disabled={uploading}
-              style={{ ...linkButtonStyle, ...disabledStyle(uploading) }}
+              className="btn-link btn-quiet"
             >
-              {uploading ? "Uploading…" : media ? "Replace" : "Attach image or video"}
+              Remove
             </button>
-            {media && (
-              <button
-                type="button"
-                onClick={onRemove}
-                disabled={uploading}
-                style={{ ...linkButtonStyle, ...disabledStyle(uploading) }}
-              >
-                Remove
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
@@ -475,42 +531,8 @@ function MediaField({
         type="file"
         accept="image/*,video/*"
         onChange={(e) => onChosen(e.target.files?.[0])}
-        style={{ display: "none" }}
+        className="hidden"
       />
     </div>
   );
 }
-
-const fieldsetStyle = {
-  marginTop: "1rem",
-  padding: "0.75rem 1rem 1rem",
-  border: "1px solid #e2e8f0",
-  borderRadius: "0.375rem",
-} as const;
-
-const legendStyle = {
-  padding: "0 0.375rem",
-  fontSize: "0.813rem",
-  color: "#475569",
-} as const;
-
-const checkboxRowStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "0.5rem",
-  fontSize: "0.938rem",
-  cursor: "pointer",
-} as const;
-
-const reasonStyle = {
-  margin: "0.25rem 0 0 1.5rem",
-  color: "#b45309",
-  fontSize: "0.813rem",
-} as const;
-
-const actionsStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "0.75rem",
-  marginTop: "1.25rem",
-} as const;

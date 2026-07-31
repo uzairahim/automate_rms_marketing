@@ -10,12 +10,13 @@ import {
   type ConnectedAccount,
   type Platform,
 } from "./api.js";
-import { primaryButtonStyle } from "./LoginScreen.jsx";
+import { PLATFORM_LABELS } from "./postRules.js";
+import { ErrorNote, LoadingNote, PlatformTile, SectionHeading } from "./ui.jsx";
 
 /**
  * What the Client can post to (PRD stories 21–28).
  *
- * One row per account the API returns, each showing whether it is ready to post
+ * One card per account the API returns, each showing whether it is ready to post
  * to — because "nothing is connected" is exactly the thing a User needs to be
  * told, not an empty space. Which platforms appear is the API's call (the Plan
  * decides, and a still-linked account is always listed), so this renders what it
@@ -93,35 +94,46 @@ export function Connections() {
   }
 
   if (!connections) {
-    return <p style={{ color: "#64748b" }}>Loading connections…</p>;
+    return <LoadingNote>Loading connections…</LoadingNote>;
   }
 
   return (
-    <section style={{ marginTop: "2rem" }}>
-      <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>Connected accounts</h2>
+    <section className="max-w-3xl">
+      <SectionHeading
+        eyebrow="Accounts"
+        title="Connected accounts"
+      />
 
-      {error && (
-        <p role="alert" style={{ color: "#b91c1c", fontSize: "0.875rem" }}>
-          {error}
-        </p>
-      )}
+      <p className="-mt-2 mb-6 max-w-md text-body-sm text-muted">
+        Link a business account per platform. Anything connected here becomes a
+        destination in the composer.
+      </p>
 
-      <ul style={{ listStyle: "none", padding: 0, maxWidth: "34rem" }}>
+      {error && <ErrorNote>{error}</ErrorNote>}
+
+      <ul className="m-0 flex list-none flex-col gap-3 p-0">
         {connections.map((connection) => (
-          <li key={connection.platform}>
-            <div style={rowStyle}>
-              <div>
-                <strong style={{ textTransform: "capitalize" }}>{connection.platform}</strong>
-                <div style={{ fontSize: "0.875rem", color: "#64748b" }}>
+          <li key={connection.platform} className="card p-5">
+            <div className="flex flex-wrap items-center gap-4">
+              <PlatformTile platform={connection.platform} />
+
+              <div className="min-w-0 flex-1">
+                <p className="m-0 text-title-md text-ink">
+                  {PLATFORM_LABELS[connection.platform]}
+                </p>
+                <div className="mt-0.5 text-body-sm">
                   <StatusLabel connection={connection} />
                 </div>
               </div>
 
+              {/* `w-full` below `sm` makes the action its own flex line rather
+                  than a third column — squeezed beside the name, the status
+                  wraps to three lines on a phone. */}
               {connection.status === "connected" ? (
                 <button
                   onClick={() => void disconnect(connection.platform)}
                   disabled={busy === connection.platform}
-                  style={secondaryButtonStyle}
+                  className="btn btn-secondary w-full sm:w-auto"
                 >
                   Disconnect
                 </button>
@@ -129,7 +141,7 @@ export function Connections() {
                 <button
                   onClick={() => void connect(connection.platform)}
                   disabled={busy === connection.platform}
-                  style={{ ...primaryButtonStyle, marginTop: 0 }}
+                  className="btn btn-primary w-full sm:w-auto"
                 >
                   {connection.status === "token_expired" ? "Reconnect" : "Connect"}
                 </button>
@@ -169,15 +181,16 @@ export function Connections() {
  */
 function InstagramGuidance({ message }: { message: string }) {
   return (
-    <div role="alert" style={guidanceStyle}>
-      <p style={{ margin: 0 }}>{message}</p>
+    <div role="alert" className="callout mt-4 animate-rise">
+      <p className="m-0">{message}</p>
       <a
         href="https://help.instagram.com/502981923235522"
         target="_blank"
         rel="noreferrer"
-        style={{ color: "var(--brand-primary)", fontSize: "0.875rem" }}
+        className="btn-link"
       >
         How to switch to a Business or Creator account
+        <span aria-hidden="true">↗</span>
       </a>
     </div>
   );
@@ -207,7 +220,7 @@ function FacebookTokenForm({
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} style={linkButtonStyle}>
+      <button type="button" onClick={() => setOpen(true)} className="btn-link mt-4">
         {expired ? "Paste a new Page token" : "Paste a Page token instead"}
       </button>
     );
@@ -215,14 +228,14 @@ function FacebookTokenForm({
 
   return (
     <form
-      style={tokenFormStyle}
+      className="card-soft mt-4 flex animate-rise flex-col gap-4 p-4"
       onSubmit={(event) => {
         event.preventDefault();
         void onSubmit(token.trim(), pageId.trim(), displayName.trim());
       }}
     >
-      <label style={fieldLabelStyle}>
-        Page access token
+      <label className="field">
+        <span className="field-label">Page access token</span>
         {/* Masked and never autofilled: the token grants full Page control and
             must not be shoulder-surfed or stored by the browser (ADR 0006/0008). */}
         <input
@@ -230,107 +243,57 @@ function FacebookTokenForm({
           value={token}
           onChange={(e) => setToken(e.target.value)}
           autoComplete="off"
-          style={inputStyle}
+          className="input"
         />
       </label>
-      <label style={fieldLabelStyle}>
-        Page ID
-        <input value={pageId} onChange={(e) => setPageId(e.target.value)} style={inputStyle} />
-      </label>
-      <label style={fieldLabelStyle}>
-        Page name (optional)
-        <input
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          style={inputStyle}
-        />
-      </label>
-      <button
-        type="submit"
-        disabled={busy || !token.trim() || !pageId.trim()}
-        style={{ ...primaryButtonStyle, marginTop: 0 }}
-      >
-        Save token
-      </button>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="field">
+          <span className="field-label">Page ID</span>
+          <input value={pageId} onChange={(e) => setPageId(e.target.value)} className="input" />
+        </label>
+        <label className="field">
+          <span className="field-label">
+            Page name <span className="font-normal text-muted">optional</span>
+          </span>
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            className="input"
+          />
+        </label>
+      </div>
+
+      <div className="flex gap-2.5">
+        <button
+          type="submit"
+          disabled={busy || !token.trim() || !pageId.trim()}
+          className="btn btn-primary"
+        >
+          Save token
+        </button>
+        <button type="button" onClick={() => setOpen(false)} className="btn btn-secondary">
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }
 
 function StatusLabel({ connection }: { connection: ConnectedAccount }) {
   if (connection.status === "connected") {
-    return <>Connected{connection.displayName ? ` — ${connection.displayName}` : ""}</>;
+    return (
+      <span className="flex items-center gap-1.5 text-muted">
+        <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+        Connected{connection.displayName ? ` — ${connection.displayName}` : ""}
+      </span>
+    );
   }
   if (connection.status === "token_expired") {
     // The one status that asks the User for something, so it says so plainly.
-    return <span style={{ color: "#b45309" }}>Access expired — reconnect to keep posting</span>;
+    return (
+      <span className="text-[#85560a]">Access expired — reconnect to keep posting</span>
+    );
   }
-  return <>Not connected</>;
+  return <span className="text-muted">Not connected</span>;
 }
-
-const rowStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "1rem",
-  padding: "0.875rem 0",
-  borderBottom: "1px solid #e2e8f0",
-} as const;
-
-const guidanceStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.5rem",
-  padding: "0.875rem",
-  marginBottom: "0.875rem",
-  background: "#fffbeb",
-  border: "1px solid #fde68a",
-  borderRadius: "0.25rem",
-  fontSize: "0.875rem",
-} as const;
-
-const secondaryButtonStyle = {
-  padding: "0.5rem 1rem",
-  background: "transparent",
-  color: "#334155",
-  border: "1px solid #cbd5e1",
-  borderRadius: "0.25rem",
-  fontSize: "0.938rem",
-  cursor: "pointer",
-} as const;
-
-const linkButtonStyle = {
-  display: "inline-block",
-  margin: "0 0 0.875rem",
-  padding: 0,
-  background: "none",
-  border: "none",
-  color: "var(--brand-primary)",
-  fontSize: "0.875rem",
-  cursor: "pointer",
-} as const;
-
-const tokenFormStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.625rem",
-  padding: "0.875rem",
-  marginBottom: "0.875rem",
-  background: "#f8fafc",
-  border: "1px solid #e2e8f0",
-  borderRadius: "0.25rem",
-} as const;
-
-const fieldLabelStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.25rem",
-  fontSize: "0.813rem",
-  color: "#475569",
-} as const;
-
-const inputStyle = {
-  padding: "0.5rem",
-  border: "1px solid #cbd5e1",
-  borderRadius: "0.25rem",
-  fontSize: "0.875rem",
-} as const;

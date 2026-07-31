@@ -5,7 +5,7 @@ import {
   selectFacebookPage,
   type FacebookPageChoice,
 } from "./api.js";
-import { primaryButtonStyle } from "./LoginScreen.jsx";
+import { ClayOrb, LoadingNote, PlatformTile } from "./ui.jsx";
 
 /**
  * Where a User lands coming back from Facebook (ADR 0005).
@@ -80,85 +80,99 @@ export function FacebookCallback({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <section style={{ marginTop: "2rem", maxWidth: "34rem" }}>
-      <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>Connect a Facebook Page</h2>
+    <section className="card relative overflow-hidden p-7 sm:p-9">
+      {/* A wash of the platform's own card color in the corner, so the screen
+          belongs to the thing being connected without a colored header band
+          cutting across it. Held flush to the corner so the gradient has
+          reached transparent by the card's edge; pulled beyond it, the card's
+          clip would slice it off mid-fade. */}
+      <span
+        aria-hidden="true"
+        className="clay-wash pointer-events-none absolute right-0 top-0 size-64 opacity-70"
+        style={{ ["--orb" as string]: "var(--color-clay-lavender)" }}
+      />
 
-      {state.phase === "exchanging" && <p style={muted}>Checking with Facebook…</p>}
-      {state.phase === "connecting" && <p style={muted}>Connecting…</p>}
-
-      {state.phase === "no-pages" && (
-        <div role="alert">
-          <p>{state.message}</p>
-          <p style={muted}>
-            Once the Page exists and your Facebook account manages it, come back and connect
-            again.
-          </p>
-          <a
-            href="https://www.facebook.com/pages/create"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "var(--brand-primary)" }}
-          >
-            Create a Facebook Business Page
-          </a>
-          <div>
-            <button onClick={onDone} style={{ ...primaryButtonStyle }}>
-              Back
-            </button>
-          </div>
+      <div className="relative">
+        <div className="flex items-center gap-3">
+          <PlatformTile platform="facebook" />
+          <h2 className="m-0 text-title-lg text-ink">Connect a Facebook Page</h2>
         </div>
-      )}
 
-      {state.phase === "choosing" && (
-        <>
-          <p style={muted}>
-            {state.pages.length === 1
-              ? "Confirm the Page this account should post to."
-              : "Choose the Page this account should post to."}
-          </p>
-          <ul style={{ listStyle: "none", padding: 0 }}>
-            {state.pages.map((page) => (
-              <li key={page.id} style={choiceRow}>
-                <span>{page.name}</span>
-                <button onClick={() => void choose(page)} style={{ ...primaryButtonStyle, marginTop: 0 }}>
-                  Connect
+        <div className="mt-6">
+          {state.phase === "exchanging" && <LoadingNote>Checking with Facebook…</LoadingNote>}
+          {state.phase === "connecting" && <LoadingNote>Connecting…</LoadingNote>}
+
+          {state.phase === "no-pages" && (
+            <div role="alert">
+              <p className="m-0 text-body-md text-ink-strong">{state.message}</p>
+              <p className="mt-3 text-body-sm text-muted">
+                Once the Page exists and your Facebook account manages it, come back and connect
+                again.
+              </p>
+              <a
+                href="https://www.facebook.com/pages/create"
+                target="_blank"
+                rel="noreferrer"
+                className="btn-link mt-4"
+              >
+                Create a Facebook Business Page
+                <span aria-hidden="true">↗</span>
+              </a>
+              <div className="mt-6">
+                <button onClick={onDone} className="btn btn-primary">
+                  Back
                 </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+              </div>
+            </div>
+          )}
 
-      {state.phase === "connected" && (
-        <div>
-          <p>
-            Connected to <strong>{state.pageName}</strong>.
-          </p>
-          <button onClick={onDone} style={primaryButtonStyle}>
-            Done
-          </button>
-        </div>
-      )}
+          {state.phase === "choosing" && (
+            <>
+              <p className="m-0 text-body-sm text-muted">
+                {state.pages.length === 1
+                  ? "Confirm the Page this account should post to."
+                  : "Choose the Page this account should post to."}
+              </p>
+              <ul className="m-0 mt-4 flex list-none flex-col gap-2 p-0">
+                {state.pages.map((page) => (
+                  <li
+                    key={page.id}
+                    className="card-soft flex flex-wrap items-center justify-between gap-3 p-4"
+                  >
+                    <span className="text-title-sm text-ink">{page.name}</span>
+                    <button onClick={() => void choose(page)} className="btn btn-primary btn-sm">
+                      Connect
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
 
-      {state.phase === "error" && (
-        <div role="alert">
-          <p style={{ color: "#b91c1c" }}>{state.message}</p>
-          <button onClick={onDone} style={primaryButtonStyle}>
-            Back
-          </button>
+          {state.phase === "connected" && (
+            <div>
+              <div className="flex items-center gap-3">
+                <ClayOrb tone="var(--color-clay-mint)" className="size-9 shrink-0" />
+                <p className="m-0 text-body-md text-ink-strong">
+                  Connected to <strong>{state.pageName}</strong>.
+                </p>
+              </div>
+              <button onClick={onDone} className="btn btn-primary mt-6">
+                Done
+              </button>
+            </div>
+          )}
+
+          {state.phase === "error" && (
+            <div role="alert">
+              <p className="callout callout-error m-0">{state.message}</p>
+              <button onClick={onDone} className="btn btn-primary mt-6">
+                Back
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }
-
-const muted = { color: "#64748b" } as const;
-
-const choiceRow = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "1rem",
-  padding: "0.75rem 0",
-  borderBottom: "1px solid #e2e8f0",
-} as const;

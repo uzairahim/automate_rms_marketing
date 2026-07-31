@@ -1,11 +1,12 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Platform, PostStatus, TargetStatus } from "./api.js";
 import {
   PLATFORM_LABELS,
-  POST_STATUS_COLORS,
+  PLATFORM_TONES,
   POST_STATUS_LABELS,
-  TARGET_STATUS_COLORS,
+  POST_STATUS_TONES,
   TARGET_STATUS_LABELS,
+  TARGET_STATUS_TONES,
 } from "./postRules.js";
 
 /**
@@ -13,15 +14,20 @@ import {
  *
  * Extracted here rather than repeated per screen because they are the app's
  * vocabulary made visible — a status badge means the same thing wherever it
- * appears, and three copies of it would eventually stop agreeing. Styling stays
- * inline and in the existing slate/`--brand-primary` palette, matching the rest
- * of the SPA; the Client's accent is used for anything primary so even these
- * belong to the Client.
+ * appears, and three copies of it would eventually stop agreeing. Styling is
+ * Clay's, expressed as Tailwind classes over the tokens in `index.css`; the
+ * Client's own accent stays reserved for anything primary, so even these belong
+ * to the Client.
  */
 
 export function PostStatusBadge({ status }: { status: PostStatus }) {
   return (
-    <span style={{ ...badgeStyle, color: POST_STATUS_COLORS[status] }}>
+    <span className={`badge ${POST_STATUS_TONES[status]}`}>
+      {/* A Post still in flight gets a pulsing dot — the one status that is
+          about to change on its own, so it should not look settled. */}
+      {status === "publishing" && (
+        <span className="size-1.5 animate-pulse rounded-full bg-current" aria-hidden="true" />
+      )}
       {POST_STATUS_LABELS[status]}
     </span>
   );
@@ -29,21 +35,61 @@ export function PostStatusBadge({ status }: { status: PostStatus }) {
 
 export function TargetStatusBadge({ status }: { status: TargetStatus }) {
   return (
-    <span style={{ ...badgeStyle, color: TARGET_STATUS_COLORS[status] }}>
-      {TARGET_STATUS_LABELS[status]}
-    </span>
+    <span className={`badge ${TARGET_STATUS_TONES[status]}`}>{TARGET_STATUS_LABELS[status]}</span>
   );
 }
 
 /** A platform's name as a compact chip, for a Post's fan-out at a glance. */
 export function PlatformChip({ platform }: { platform: Platform }) {
-  return <span style={chipStyle}>{PLATFORM_LABELS[platform]}</span>;
+  return (
+    <span className="chip">
+      <span
+        className="size-2 rounded-full"
+        style={{ background: PLATFORM_TONES[platform] }}
+        aria-hidden="true"
+      />
+      {PLATFORM_LABELS[platform]}
+    </span>
+  );
+}
+
+/**
+ * A platform as a modeled clay tile, carrying its initial.
+ *
+ * The three platforms are the app's most-repeated objects — they head every
+ * connection row and every composer destination — so they get the system's
+ * signature surface rather than a flat swatch. The color comes from
+ * `PLATFORM_TONES`, which draws from DESIGN.md's six-color palette.
+ */
+export function PlatformTile({
+  platform,
+  size = "md",
+}: {
+  platform: Platform;
+  /** `sm` sits inside a row of text; `md` heads a card. */
+  size?: "sm" | "md";
+}) {
+  const tone = PLATFORM_TONES[platform];
+  // Teal is the one dark tone in the palette, so it is the one that needs
+  // light type on it.
+  const light = platform === "tiktok";
+  return (
+    <span
+      className={`clay-pill grid shrink-0 place-items-center font-semibold ${
+        size === "sm" ? "size-8 text-[0.8125rem]" : "size-11 text-title-sm"
+      } ${light ? "text-white" : "text-ink"}`}
+      style={{ ["--orb" as string]: tone }}
+      aria-hidden="true"
+    >
+      {PLATFORM_LABELS[platform].charAt(0)}
+    </span>
+  );
 }
 
 /** An API failure, said in the API's own words. */
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <p role="alert" style={{ color: "#b91c1c", fontSize: "0.875rem", margin: "0.5rem 0" }}>
+    <p role="alert" className="callout callout-error my-3 text-body-sm">
       {children}
     </p>
   );
@@ -51,7 +97,31 @@ export function ErrorNote({ children }: { children: ReactNode }) {
 
 /** Empty state copy — what to do, not just that there is nothing here. */
 export function EmptyNote({ children }: { children: ReactNode }) {
-  return <p style={{ color: "#64748b", fontSize: "0.875rem" }}>{children}</p>;
+  return (
+    <div className="card-soft flex items-center gap-4 px-5 py-6">
+      {/* A soft field of color rather than an icon: the empty state should feel
+          like room to fill, not like a warning. */}
+      <span
+        className="clay-orb clay-orb-alt size-9 shrink-0 opacity-70"
+        style={{ ["--orb" as string]: "var(--color-clay-mint)" }}
+        aria-hidden="true"
+      />
+      <p className="m-0 text-body-sm text-muted">{children}</p>
+    </div>
+  );
+}
+
+/** A screen still waiting on its first fetch. */
+export function LoadingNote({ children }: { children: ReactNode }) {
+  return (
+    <p className="flex items-center gap-2.5 text-body-sm text-muted">
+      <span
+        className="size-3 animate-[breathe_2s_ease-in-out_infinite] rounded-full bg-clay-peach"
+        aria-hidden="true"
+      />
+      {children}
+    </p>
+  );
 }
 
 /**
@@ -82,94 +152,87 @@ export function MediaPreview({
 
   if (failed) return null;
 
-  const style: CSSProperties = {
-    width: size,
-    height: size,
-    objectFit: "cover",
-    borderRadius: "0.25rem",
-    border: "1px solid #e2e8f0",
-    background: "#f1f5f9",
-  };
+  const className =
+    "shrink-0 rounded-lg bg-surface-card object-cover shadow-clay ring-1 ring-hairline-soft";
+  const style = { width: size, height: size };
+
   return type === "video" ? (
-    <video src={url} style={style} controls muted playsInline onError={() => setFailed(true)} />
+    <video
+      src={url}
+      className={className}
+      style={style}
+      controls
+      muted
+      playsInline
+      onError={() => setFailed(true)}
+    />
   ) : (
-    <img src={url} alt="Attached media" style={style} onError={() => setFailed(true)} />
+    <img
+      src={url}
+      alt="Attached media"
+      className={className}
+      style={style}
+      onError={() => setFailed(true)}
+    />
   );
 }
 
-const badgeStyle = {
-  fontSize: "0.75rem",
-  fontWeight: 600,
-  textTransform: "uppercase",
-  letterSpacing: "0.03em",
-} as const;
-
-const chipStyle = {
-  display: "inline-block",
-  padding: "0.125rem 0.5rem",
-  background: "#f1f5f9",
-  border: "1px solid #e2e8f0",
-  borderRadius: "999px",
-  fontSize: "0.75rem",
-  color: "#475569",
-} as const;
-
 /**
- * The style a disabled button needs on top of its own.
+ * A screen's heading, with room for an action beside it.
  *
- * Necessary because this app styles inline, and an inline style cannot express
- * `:disabled` — so without this a blocked "Publish now" renders identically to a
- * live one. A primary action that looks pressable and does nothing reads as a
- * broken app, precisely when the composer is trying to explain what is missing.
+ * `eyebrow` carries the small uppercase label DESIGN.md puts above section
+ * heads — it is what lets the heading itself stay a plain noun.
  */
-export function disabledStyle(disabled: boolean) {
-  return disabled ? { opacity: 0.45, cursor: "not-allowed" } : null;
+export function SectionHeading({
+  eyebrow,
+  title,
+  children,
+}: {
+  eyebrow?: string;
+  title: ReactNode;
+  /** An action that belongs to this section, aligned to the right. */
+  children?: ReactNode;
+}) {
+  return (
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div>
+        {eyebrow && (
+          <p className="m-0 mb-1.5 text-overline uppercase text-muted">{eyebrow}</p>
+        )}
+        <h2 className="m-0 text-display-sm text-ink">{title}</h2>
+      </div>
+      {children}
+    </div>
+  );
 }
 
-export const cardStyle = {
-  padding: "1rem",
-  border: "1px solid #e2e8f0",
-  borderRadius: "0.375rem",
-  background: "#fff",
-} as const;
-
-export const secondaryButtonStyle = {
-  padding: "0.5rem 1rem",
-  background: "transparent",
-  color: "#334155",
-  border: "1px solid #cbd5e1",
-  borderRadius: "0.25rem",
-  fontSize: "0.938rem",
-  cursor: "pointer",
-} as const;
-
-export const linkButtonStyle = {
-  padding: 0,
-  background: "none",
-  border: "none",
-  color: "var(--brand-primary)",
-  fontSize: "0.875rem",
-  textAlign: "left",
-  cursor: "pointer",
-} as const;
-
-export const inputStyle = {
-  padding: "0.5rem",
-  border: "1px solid #cbd5e1",
-  borderRadius: "0.25rem",
-  fontSize: "0.938rem",
-} as const;
-
-export const fieldLabelStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "0.25rem",
-  fontSize: "0.813rem",
-  color: "#475569",
-} as const;
-
-export const sectionHeadingStyle = {
-  fontSize: "1.1rem",
-  fontWeight: 600,
-  margin: "0 0 0.75rem",
-} as const;
+/**
+ * A decorative clay form.
+ *
+ * DESIGN.md's brand voltage is commissioned 3D claymation art. This is the
+ * system's stand-in: the same modeled-clay read, built from a single color, so
+ * the warmth appears on empty states and entry screens without an asset
+ * pipeline. Always `aria-hidden` — it says nothing a screen reader needs.
+ */
+export function ClayOrb({
+  tone,
+  className = "",
+  alt = false,
+  drift = false,
+}: {
+  /** Any of the six palette colors, as a CSS value. */
+  tone: string;
+  className?: string;
+  /** The second silhouette, so two orbs together do not read as copies. */
+  alt?: boolean;
+  /** Slow ambient motion. Suppressed for reduced-motion users by the theme. */
+  drift?: boolean;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`clay-orb ${alt ? "clay-orb-alt" : ""} ${drift ? "animate-breathe" : ""} ${className}`}
+      style={{ ["--orb" as string]: tone }}
+    />
+  );
+}
