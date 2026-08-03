@@ -3,6 +3,8 @@ import type { Clock } from "../core/clock.js";
 import type { Publisher } from "../core/publisher.js";
 import type { SecretCipher } from "../core/crypto.js";
 import { markTokenExpiredForPlatform, openAccountCredential } from "../connections/accounts.js";
+import { findClientById } from "../tenancy/clients.js";
+import { publishBlock } from "../tenancy/eligibility.js";
 import { findMediaForPost, settleMediaForPost } from "../media/media.js";
 import {
   findTarget,
@@ -31,6 +33,17 @@ export const RETRY_INTERVAL_MS = 60_000;
 /** How many auto-retries a failed Target gets before it waits for a manual one. */
 export const MAX_AUTO_RETRIES = 2;
 
+/** What {@link attemptPublish} did to a Target. */
+export interface PublishAttempt {
+  target: Target;
+  /**
+   * Whether the Client was entitled to publish this Target at all (ADR 0011).
+   * `false` means nothing was sent and nothing will be retried — so a caller
+   * counting work for an operator must not report it as an attempt.
+   */
+  eligible: boolean;
+}
+
 /**
  * Attempt to publish one Target and persist the outcome.
  *
@@ -41,6 +54,52 @@ export const MAX_AUTO_RETRIES = 2;
  * into the automatic chain.
  */
 export async function attemptPublish(
+  pool: pg.Pool,
+  clock: Clock,
+  publisher: Publisher,
+  cipher: SecretCipher,
+  post: Post,
+  target: Target,
+  options: { auto: boolean },
+): Promise<PublishAttempt> {
+  // The eligibility gate, asked at the moment work fires rather than the moment
+  // the request that scheduled it arrived (ADR 0011). Every path that reaches a
+  // Publisher — the initial fan-out, the auto-retry tick, a User's manual retry —
+  // comes through here, so this one call covers all three. Read fresh: the whole
+  // point is that the Plan can have changed since the Post was composed.
+  //
+  // Terminal, and deliberately *before* the credential is opened: a Target that
+  // was never eligible is not retried, because no amount of retrying makes a
+  // suspended Client entitled.
+  const client = await findClientById(pool, post.clientId);
+  const blocked = publishBlock(client?.plan ?? null, target.platform);
+  if (blocked) {
+    return {
+      eligible: false,
+      target: await recordTargetOutcome(pool, clock, target.id, {
+        status: "failed",
+        externalId: null,
+        permalink: null,
+        error: blocked.message,
+        retryCount: target.retryCount,
+        nextRetryAt: null,
+      }),
+    };
+  }
+
+  return {
+    eligible: true,
+    target: await publishOnce(pool, clock, publisher, cipher, post, target, options),
+  };
+}
+
+/**
+ * One eligible publish attempt: open the Connected Account's credential, hand it
+ * to the Publisher, and persist whatever came back. Split from the gate above so
+ * that adding a reason a Target *never gets here* does not have to thread through
+ * every outcome this records.
+ */
+async function publishOnce(
   pool: pg.Pool,
   clock: Clock,
   publisher: Publisher,

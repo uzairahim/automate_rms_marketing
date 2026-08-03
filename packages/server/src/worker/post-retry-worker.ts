@@ -30,10 +30,11 @@ export function startPostRetryWorker(deps: {
         deps.tokenCipher,
         deps.mediaDir,
       );
-      if (outcome.attempted) {
+      if (outcome.attempted || outcome.blocked) {
         console.log(
           `[post-retry] attempted ${outcome.attempted} targets ` +
-            `(${outcome.published} published, ${outcome.failed} failed)`,
+            `(${outcome.published} published, ${outcome.failed} failed), ` +
+            `${outcome.blocked} blocked`,
         );
       }
       return outcome;

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
-import { authenticateClientRequest } from "../auth/guards.js";
-import { isPlatform, planEnables, type Plan } from "../tenancy/plan.js";
+import { accessDenied, authenticateClientRequest } from "../auth/guards.js";
+import { isPlatform, type Plan } from "../tenancy/plan.js";
+import { publishBlock } from "../tenancy/eligibility.js";
 import type { Clock } from "../core/clock.js";
 import type { Platform } from "../core/publisher.js";
 import { findAccount } from "../connections/accounts.js";
@@ -161,15 +162,34 @@ async function resolveCompose(
       };
     }
 
-    const notEnabled = platforms.find((platform) => !planEnables(plan, platform));
-    if (notEnabled) {
+    // The compose-time half of the publish-eligibility rule (ADR 0011): the
+    // same question the fan-out asks per Target immediately before publishing,
+    // asked here so a User is told while they can still act on it rather than
+    // discovering an impossible Post only after it has failed. The fire-time
+    // call is not redundant with this one — deleting it reopens the bug where a
+    // Post scheduled today publishes tomorrow under a Plan that no longer
+    // allows it.
+    for (const platform of platforms) {
+      const blocked = publishBlock(plan, platform);
+      if (!blocked) continue;
+      if (blocked.reason === "platform_not_in_plan") {
+        return {
+          ok: false,
+          code: 403,
+          body: {
+            error: "platform_not_enabled",
+            message: `This Client's plan does not include ${platform}.`,
+          },
+        };
+      }
+      // Access status: already refused by `authenticateClientRequest` before any
+      // route body runs, so this is unreachable today. Kept so that asking the
+      // whole rule here can never publish something the rule forbids, and
+      // reported through the same codes that guard owns rather than a new one.
       return {
         ok: false,
         code: 403,
-        body: {
-          error: "platform_not_enabled",
-          message: `This Client's plan does not include ${notEnabled}.`,
-        },
+        body: accessDenied(plan.accessStatus) ?? { error: "unknown_client" },
       };
     }
 

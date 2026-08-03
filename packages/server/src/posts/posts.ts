@@ -273,7 +273,17 @@ export async function findDueTargets(pool: pg.Pool, asOf: Date): Promise<Target[
   return rows.map(targetFromRow);
 }
 
-/** Scheduled Posts whose fire time has arrived — the scheduler's due-query. */
+/**
+ * Scheduled Posts whose fire time has arrived — the scheduler's due-query.
+ *
+ * Deliberately *not* narrowed to Clients with an active access status. ADR 0011
+ * offers that as a cost prefilter on the condition that removing it never
+ * changes behavior, and here it would: a Post that came due while its Client was
+ * suspended must be Failed with an honest reason (ADR 0011), and a query that
+ * never returns it cannot fail it — it would sit `scheduled` and then fire, or
+ * miss its grace window, whenever the Client was reactivated. The eligibility
+ * decision therefore stays in one place, above this query.
+ */
 export async function findDuePosts(pool: pg.Pool, asOf: Date): Promise<Post[]> {
   const { rows } = await pool.query<PostRow>(
     `SELECT ${POST_COLUMNS} FROM posts

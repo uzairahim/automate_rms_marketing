@@ -16,10 +16,12 @@ TikTok).
 _Avoid_: Tenant, Organization, Account, Company
 
 **Superadmin**:
-The platform operator (us). A single global role that provisions Clients and
-their Users, and can suspend a Client's access (e.g. on non-payment or plan
-expiry). Operates from its own `admin.` subdomain — a surface separate from every
-Client subdomain but backed by the same shared database.
+The platform operator (us) — a named person with their own credentials, holding
+a single global role that provisions Clients and their Users and can suspend a
+Client's access (e.g. on non-payment or plan expiry). Belongs to no Client and is
+never a User: the two identities never meet, and a Superadmin cannot log into a
+Client surface. Operates from its own `admin.` subdomain — a surface separate
+from every Client subdomain but backed by the same shared database.
 _Avoid_: Owner, Root, Admin
 
 **User**:
@@ -39,10 +41,12 @@ _Avoid_: Channel, Integration, Social Login, Profile
 
 **Plan**:
 The Superadmin-configured bundle for a Client: which platforms it may use (e.g.
-TikTok only), plus its access status (active, suspended, expired). Gates both
-what the Client can do and whether it can log in at all. Payment is handled
-manually off-platform — there is no payment gateway; the Superadmin flips the
-access status by hand on non-payment or expiry.
+TikTok only), plus its access status (active, suspended, expired). Gates whether
+the Client can log in and everything it can do — including work already set in
+motion: while access is not `active`, nothing publishes on the Client's behalf,
+so its Scheduled Posts do not fire and its failed Targets are not retried.
+Payment is handled manually off-platform — there is no payment gateway; the
+Superadmin flips the access status by hand on non-payment or expiry.
 _Avoid_: Subscription, Tier, Package, Entitlement, Feature flag
 
 **Branding**:
@@ -65,9 +69,11 @@ _Avoid_: Update, Content, Message, Publication
 **Target**:
 One Connected Account a Post is being sent to. A Post has one Target per selected
 platform. Each Target publishes independently and ends `Published` (with the
-platform's post ID/permalink) or `Failed`. A failed Target is retried
-automatically twice at 1-minute intervals, then left for the User to retry. A
-success is never rolled back because another Target failed.
+platform's post ID/permalink) or `Failed` — the latter either because the attempt
+failed or because the Client was not entitled to publish it at the moment it came
+due. A failed Target is retried automatically twice at 1-minute intervals, then
+left for the User to retry; a Target that was never eligible is not retried at
+all. A success is never rolled back because another Target failed.
 _Avoid_: Destination, Channel, Recipient
 
 **Media**:

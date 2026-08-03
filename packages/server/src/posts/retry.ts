@@ -20,6 +20,13 @@ export interface RetryOutcome {
   published: number;
   /** Attempts that failed and used up their last auto-retry. */
   failed: number;
+  /**
+   * Due Targets whose Client was no longer entitled to publish them (ADR 0011).
+   * Failed on the spot without reaching a Publisher, so deliberately *not*
+   * counted as attempts — the operator reading this tick's log should be able to
+   * tell a refusal apart from a platform that turned us down.
+   */
+  blocked: number;
 }
 
 /** A due Target's Post, looked up by id — the retry job runs across every Client. */
@@ -40,7 +47,7 @@ export async function retryDueTargets(
   mediaDir: string,
 ): Promise<RetryOutcome> {
   const due = await findDueTargets(pool, clock.now());
-  const outcome: RetryOutcome = { attempted: 0, published: 0, failed: 0 };
+  const outcome: RetryOutcome = { attempted: 0, published: 0, failed: 0, blocked: 0 };
   // Several due Targets can belong to the same Post; cache so it's fetched once.
   const postCache = new Map<string, Post | null>();
   const affectedPosts = new Set<string>();
@@ -53,12 +60,22 @@ export async function retryDueTargets(
     }
     if (!post) continue; // A due Target with no Post left (FK cascade) has nothing to retry.
 
-    outcome.attempted += 1;
-    const updated = await attemptPublish(pool, clock, publisher, cipher, post, target, {
-      auto: true,
-    });
-    if (updated.status === "published") outcome.published += 1;
-    else if (updated.status === "failed") outcome.failed += 1;
+    const { target: updated, eligible } = await attemptPublish(
+      pool,
+      clock,
+      publisher,
+      cipher,
+      post,
+      target,
+      { auto: true },
+    );
+    if (!eligible) {
+      outcome.blocked += 1;
+    } else {
+      outcome.attempted += 1;
+      if (updated.status === "published") outcome.published += 1;
+      else if (updated.status === "failed") outcome.failed += 1;
+    }
     affectedPosts.add(target.postId);
   }
 

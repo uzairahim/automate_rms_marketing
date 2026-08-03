@@ -35,7 +35,7 @@ export function startPostSchedulerWorker(deps: {
       );
       if (outcome.due) {
         console.log(
-          `[post-scheduler] ${outcome.due} due (${outcome.fired} fired, ${outcome.missed} missed)`,
+          `[post-scheduler] ${outcome.due} due (${outcome.fired} fired, ${outcome.missed} missed, ${outcome.blocked} blocked)`,
         );
       }
       return outcome;

@@ -350,7 +350,7 @@ describe("Scheduling + grace window + drafts", () => {
       clock.advance(30 * 60 * 1000); // still 30 minutes early
       const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
-      expect(outcome).toEqual({ due: 0, fired: 0, missed: 0 });
+      expect(outcome).toEqual({ due: 0, fired: 0, missed: 0, blocked: 0 });
       expect(publisher.sent).toHaveLength(0);
     });
 
@@ -371,7 +371,7 @@ describe("Scheduling + grace window + drafts", () => {
 
       clock.advance(15 * 60 * 1000);
       const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
-      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0 });
+      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0, blocked: 0 });
 
       const final = await getPost(auth, postId);
       expect(final.json().post.status).toBe("published");
@@ -399,7 +399,7 @@ describe("Scheduling + grace window + drafts", () => {
       clock.advance(5 * 60 * 1000 + GRACE_WINDOW_MS - 60_000);
       const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
-      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0 });
+      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0, blocked: 0 });
       const final = await getPost(auth, postId);
       expect(final.json().post.status).toBe("published");
     });
@@ -420,7 +420,7 @@ describe("Scheduling + grace window + drafts", () => {
       clock.advance(5 * 60 * 1000 + GRACE_WINDOW_MS);
       const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
-      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0 });
+      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0, blocked: 0 });
       const final = await getPost(auth, postId);
       expect(final.json().post.status).toBe("published");
     });
@@ -439,7 +439,7 @@ describe("Scheduling + grace window + drafts", () => {
       clock.advance(5 * 60 * 1000 + GRACE_WINDOW_MS + 60_000); // 1 minute past grace
       const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
-      expect(outcome).toEqual({ due: 1, fired: 0, missed: 1 });
+      expect(outcome).toEqual({ due: 1, fired: 0, missed: 1, blocked: 0 });
       expect(publisher.sent).toHaveLength(0); // never attempted — no embarrassing late post
 
       const final = await getPost(auth, postId);
@@ -458,11 +458,11 @@ describe("Scheduling + grace window + drafts", () => {
 
       clock.advance(60_000);
       const first = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
-      expect(first).toEqual({ due: 1, fired: 1, missed: 0 });
+      expect(first).toEqual({ due: 1, fired: 1, missed: 0, blocked: 0 });
 
       clock.advance(60_000);
       const second = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
-      expect(second).toEqual({ due: 0, fired: 0, missed: 0 });
+      expect(second).toEqual({ due: 0, fired: 0, missed: 0, blocked: 0 });
     });
 
     it("fails a due Post whose account was disconnected while it waited", async () => {
@@ -483,7 +483,7 @@ describe("Scheduling + grace window + drafts", () => {
       clock.advance(60 * 60 * 1000);
       const outcome = await publishDuePosts(db.pool, clock, publisher, app.deps.tokenCipher, mediaDir);
 
-      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0 });
+      expect(outcome).toEqual({ due: 1, fired: 1, missed: 0, blocked: 0 });
       // Never attempted: there is no credential to attempt it with, so nothing
       // reached the Publisher at all.
       expect(publisher.sent).toHaveLength(0);
