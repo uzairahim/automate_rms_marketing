@@ -5,6 +5,8 @@ import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { FakeEmailSender } from "../src/core/fake-email.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
+import { updateBranding } from "@smma/core";
+import { provisionClient } from "./helpers/provision.js";
 
 /**
  * Slice 5 behavioral suite — light white-label branding, driven through the real
@@ -59,14 +61,8 @@ describe("White-label branding", () => {
 
   /** Provision a Client and return its id. */
   async function createClient(subdomain: string): Promise<string> {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { subdomain, timezone: "America/New_York" },
-    });
-    expect(res.statusCode).toBe(201);
-    return res.json().id as string;
+    const { clientId } = await provisionClient(db.pool, { subdomain });
+    return clientId;
   }
 
   /** Set a Client's branding via the Superadmin surface. */
@@ -181,7 +177,7 @@ describe("White-label branding", () => {
   describe("Client SPA reads branding (subdomain surface)", () => {
     it("renders the Client's configured branding from its subdomain", async () => {
       const clientId = await createClient("acme");
-      await setBranding(clientId, {
+      await updateBranding(db.pool, clientId, {
         appName: "Acme Social",
         primaryColor: "#ff6600",
         logoUrl: "https://cdn.acme.test/logo.png",
@@ -206,8 +202,8 @@ describe("White-label branding", () => {
     it("scopes the payload to the correct Client per subdomain", async () => {
       const acme = await createClient("acme");
       const globex = await createClient("globex");
-      await setBranding(acme, { appName: "Acme Social", primaryColor: "#ff0000" });
-      await setBranding(globex, { appName: "Globex Hub", primaryColor: "#00ff00" });
+      await updateBranding(db.pool, acme, { appName: "Acme Social", primaryColor: "#ff0000" });
+      await updateBranding(db.pool, globex, { appName: "Globex Hub", primaryColor: "#00ff00" });
 
       expect((await getBranding("acme")).json().branding).toMatchObject({
         appName: "Acme Social",
@@ -221,16 +217,16 @@ describe("White-label branding", () => {
 
     it("reflects a branding change on the next fetch", async () => {
       const clientId = await createClient("acme");
-      await setBranding(clientId, { appName: "Before" });
+      await updateBranding(db.pool, clientId, { appName: "Before" });
       expect((await getBranding("acme")).json().branding.appName).toBe("Before");
 
-      await setBranding(clientId, { appName: "After" });
+      await updateBranding(db.pool, clientId, { appName: "After" });
       expect((await getBranding("acme")).json().branding.appName).toBe("After");
     });
 
     it("is public — served without a session (the login screen is branded too)", async () => {
       const clientId = await createClient("acme");
-      await setBranding(clientId, { appName: "Acme Social" });
+      await updateBranding(db.pool, clientId, { appName: "Acme Social" });
 
       // No Authorization header at all.
       const res = await getBranding("acme");

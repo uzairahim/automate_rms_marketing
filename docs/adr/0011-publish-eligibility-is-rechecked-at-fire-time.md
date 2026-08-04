@@ -30,9 +30,9 @@ route middleware is invisible to it.
 
 ## Decision
 
-Publish eligibility is defined once and asked twice. It lives in
-`tenancy/eligibility.ts` and moves to `@smma/core` unchanged when that package is
-extracted (ADR 0010) — it is tenancy's rule, not the publishing domain's.
+Publish eligibility is defined once and asked twice. It lives in `@smma/core`'s
+`eligibility.ts` (extracted there per ADR 0010) — it is tenancy's rule, not the
+publishing domain's.
 
 - **At compose time**, the HTTP routes ask it, so a User is told immediately —
   "this Client's plan does not include facebook" — while they can still act on it.

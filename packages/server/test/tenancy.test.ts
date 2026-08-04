@@ -5,6 +5,7 @@ import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { FakeEmailSender } from "../src/core/fake-email.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
+import { provisionClientWithUser, TEST_PASSWORD } from "./helpers/provision.js";
 
 /**
  * Slice 2 behavioral suite — the tenancy spine driven through the real Fastify
@@ -51,25 +52,9 @@ describe("Tenancy spine: provisioning, subdomain tenancy, login", () => {
   async function provision(
     subdomain: string,
     email: string,
-    password = "correct horse battery",
+    password = TEST_PASSWORD,
   ): Promise<{ clientId: string; userId: string }> {
-    const clientRes = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { subdomain, timezone: "America/New_York" },
-    });
-    expect(clientRes.statusCode).toBe(201);
-    const clientId = clientRes.json().id as string;
-
-    const userRes = await app.inject({
-      method: "POST",
-      url: `/api/admin/clients/${clientId}/users`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { email, password },
-    });
-    expect(userRes.statusCode).toBe(201);
-    return { clientId, userId: userRes.json().id as string };
+    return provisionClientWithUser(db.pool, { subdomain, email, password });
   }
 
   describe("Superadmin provisioning (admin. surface)", () => {

@@ -4,12 +4,13 @@ import {
   buildTestApp,
   TEST_BASE_DOMAIN,
   TEST_ENCRYPTION_KEY,
-  TEST_SUPERADMIN_TOKEN,
 } from "./helpers/app.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { createSecretCipher } from "../src/core/crypto.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
+import { provisionAndLogin } from "./helpers/provision.js";
+import { updatePlan } from "@smma/core";
 
 /**
  * Slice 6 behavioral suite — connecting a Facebook Page as a Connected Account,
@@ -21,10 +22,7 @@ import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
  * assertion is on observable behavior — HTTP responses and resulting DB state.
  */
 
-const ADMIN_HOST = `admin.${TEST_BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${TEST_BASE_DOMAIN}`;
-
-const PASSWORD = "correct horse battery";
 
 describe("Connecting a Facebook Page", () => {
   let db: TestPostgres;
@@ -33,8 +31,6 @@ describe("Connecting a Facebook Page", () => {
   const publisher = new FakePublisher();
   // The same key the app is wired with, so a test can read what it stored.
   const cipher = createSecretCipher(TEST_ENCRYPTION_KEY);
-
-  const adminAuth = { authorization: `Bearer ${TEST_SUPERADMIN_TOKEN}` };
 
   beforeAll(async () => {
     db = await startTestPostgres();
@@ -60,38 +56,7 @@ describe("Connecting a Facebook Page", () => {
     subdomain = "acme",
     plan: Record<string, boolean> = { facebook: true },
   ): Promise<{ clientId: string; token: string; auth: Record<string, string> }> {
-    const clientRes = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { subdomain, timezone: "America/New_York", plan },
-    });
-    expect(clientRes.statusCode).toBe(201);
-    const clientId = clientRes.json().id as string;
-
-    const email = `u@${subdomain}.test`;
-    const userRes = await app.inject({
-      method: "POST",
-      url: `/api/admin/clients/${clientId}/users`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { email, password: PASSWORD },
-    });
-    expect(userRes.statusCode).toBe(201);
-
-    const loginRes = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      headers: { host: host(subdomain) },
-      payload: { email, password: PASSWORD },
-    });
-    expect(loginRes.statusCode).toBe(200);
-    const token = loginRes.json().token as string;
-
-    return {
-      clientId,
-      token,
-      auth: { host: host(subdomain), authorization: `Bearer ${token}` },
-    };
+    return provisionAndLogin(app, db.pool, { subdomain, plan });
   }
 
   describe("Starting Facebook login", () => {
@@ -410,12 +375,7 @@ describe("Connecting a Facebook Page", () => {
       const { clientId, auth } = await connectableClient();
       await connectPage(auth, { id: "page-a", name: "Acme Storefront" });
 
-      await app.inject({
-        method: "PATCH",
-        url: `/api/admin/clients/${clientId}/plan`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { facebook: false },
-      });
+      await updatePlan(db.pool, clientId, { facebook: false });
 
       const res = await app.inject({
         method: "GET",
@@ -548,12 +508,7 @@ describe("Connecting a Facebook Page", () => {
       // The Superadmin drops Facebook from the Plan. The Page stays linked, and
       // its token stays live — the Client must not be stuck with a connection it
       // can no longer see a way to remove.
-      await app.inject({
-        method: "PATCH",
-        url: `/api/admin/clients/${clientId}/plan`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { facebook: false },
-      });
+      await updatePlan(db.pool, clientId, { facebook: false });
 
       const res = await app.inject({
         method: "DELETE",
@@ -622,12 +577,7 @@ describe("Connecting a Facebook Page", () => {
       expect(callback.statusCode).toBe(200);
 
       // The Superadmin drops Facebook from the Plan while the User is choosing.
-      await app.inject({
-        method: "PATCH",
-        url: `/api/admin/clients/${clientId}/plan`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { facebook: false },
-      });
+      await updatePlan(db.pool, clientId, { facebook: false });
 
       const res = await app.inject({
         method: "POST",
@@ -648,12 +598,7 @@ describe("Connecting a Facebook Page", () => {
         payload: { state, code: "auth-code" },
       });
 
-      await app.inject({
-        method: "PATCH",
-        url: `/api/admin/clients/${clientId}/plan`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { accessStatus: "suspended" },
-      });
+      await updatePlan(db.pool, clientId, { accessStatus: "suspended" });
 
       const res = await app.inject({
         method: "POST",

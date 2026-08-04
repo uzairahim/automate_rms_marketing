@@ -21,6 +21,7 @@ project's three **test seams** are established as reusable harness:
 
 ```
 packages/
+  core/     What a Client is: provisioning, Plan, Branding, passwords, eligibility
   server/   Fastify API + BullMQ worker + DB + core seams (Publisher, Clock)
   web/      React + Vite SPA
 docker-compose.yml   Postgres + Redis for local dev
@@ -28,6 +29,13 @@ docker-compose.yml   Postgres + Redis for local dev
 
 The API and worker share one package (`@smma/server`) with two entrypoints
 (`src/api.ts`, `src/worker.ts`) so they share domain code and the DB layer.
+
+`@smma/core` holds the tenancy and credential modules that more than one
+deployable needs (ADR 0010) — it depends on nothing but `pg` and `bcryptjs`.
+It compiles to `dist/`, so every root script that runs the server (`build`,
+`typecheck`, `dev`, `migrate`, `seed`) builds it first, and `npm run dev` also
+watches it. `npm test` is the exception: Vitest is aliased to core's sources, so
+a test run can never pass against a stale compile.
 
 ## Prerequisites
 

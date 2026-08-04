@@ -1,22 +1,22 @@
 import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { resolveSurface } from "../tenancy/subdomain.js";
 import {
   createClient,
   createUser,
+  isAccessStatus,
   listClients,
-  setUserPassword,
-  ProvisionError,
-  type ProvisionErrorCode,
-} from "../tenancy/clients.js";
-import { isAccessStatus, updatePlan, type PlanPatch } from "../tenancy/plan.js";
-import {
   normalizeAppName,
   normalizeLogoUrl,
   normalizePrimaryColor,
+  ProvisionError,
+  resolveSurface,
+  setUserPassword,
   updateBranding,
+  updatePlan,
   type BrandingPatch,
-} from "../tenancy/branding.js";
+  type PlanPatch,
+  type ProvisionErrorCode,
+} from "@smma/core";
 
 /**
  * The Superadmin `admin.` API surface (PRD stories 1, 5, 7, 12).

@@ -1,3 +1,5 @@
+import { PLATFORMS, type Platform } from "@smma/core";
+
 /**
  * Publisher interface (ADR 0002) — the single seam between our domain logic and
  * the platform APIs (Facebook, Instagram, TikTok).
@@ -17,9 +19,12 @@
  * BYO token) replace all of them together or none of them.
  */
 
-export type Platform = "facebook" | "instagram" | "tiktok";
-
-export const PLATFORMS: readonly Platform[] = ["facebook", "instagram", "tiktok"];
+/**
+ * Which platforms exist is a fact about a Client's Plan before it is a fact
+ * about publishing, so the list lives in `@smma/core` and is re-exported here
+ * — one definition, reachable from whichever side of the domain a caller is on.
+ */
+export { PLATFORMS, type Platform };
 
 /**
  * The platforms that are one Meta login: a Facebook Page, and the Instagram

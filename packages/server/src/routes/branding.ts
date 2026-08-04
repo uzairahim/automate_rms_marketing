@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { resolveClientForRequest } from "../auth/guards.js";
-import { getBranding } from "../tenancy/branding.js";
+import { getBranding } from "@smma/core";
 
 /**
  * Client-facing branding surface (PRD story 5). The SPA fetches this at load,

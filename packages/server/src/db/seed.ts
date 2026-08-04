@@ -1,7 +1,12 @@
 import pg from "pg";
-import { createClient, createUser, findClientBySubdomain, setUserPassword } from "../tenancy/clients.js";
-import { ProvisionError } from "../tenancy/errors.js";
-import type { PlanPatch } from "../tenancy/plan.js";
+import {
+  createClient,
+  createUser,
+  findClientBySubdomain,
+  ProvisionError,
+  setUserPassword,
+  type PlanPatch,
+} from "@smma/core";
 import { isMainModule } from "../cli.js";
 
 /**

@@ -1,5 +1,5 @@
 import type pg from "pg";
-import { hashPassword, isStrongPassword, WEAK_PASSWORD_MESSAGE } from "../auth/passwords.js";
+import { hashPassword, isStrongPassword, WEAK_PASSWORD_MESSAGE } from "./passwords.js";
 import { isValidSubdomain } from "./subdomain.js";
 import { ProvisionError } from "./errors.js";
 import { planFromRow, type Plan, type PlanColumns, type PlanPatch } from "./plan.js";

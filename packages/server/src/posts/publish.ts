@@ -3,8 +3,7 @@ import type { Clock } from "../core/clock.js";
 import type { Publisher } from "../core/publisher.js";
 import type { SecretCipher } from "../core/crypto.js";
 import { markTokenExpiredForPlatform, openAccountCredential } from "../connections/accounts.js";
-import { findClientById } from "../tenancy/clients.js";
-import { publishBlock } from "../tenancy/eligibility.js";
+import { findClientById, publishBlock } from "@smma/core";
 import { findMediaForPost, settleMediaForPost } from "../media/media.js";
 import {
   findTarget,

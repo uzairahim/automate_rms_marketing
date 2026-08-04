@@ -5,6 +5,8 @@ import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { FakeEmailSender } from "../src/core/fake-email.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
+import { provisionClientWithUser, TEST_PASSWORD } from "./helpers/provision.js";
+import { updatePlan } from "@smma/core";
 
 /**
  * Slice 3 behavioral suite — Plan gating and access control, driven through the
@@ -19,8 +21,6 @@ const BASE_DOMAIN = "ourapp.test";
 const SUPERADMIN_TOKEN = "test-superadmin-token";
 const ADMIN_HOST = `admin.${BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${BASE_DOMAIN}`;
-
-const PASSWORD = "correct horse battery";
 
 describe("Plan gating and access status", () => {
   let db: TestPostgres;
@@ -57,23 +57,7 @@ describe("Plan gating and access status", () => {
     email: string,
     plan?: Partial<{ facebook: boolean; instagram: boolean; tiktok: boolean }>,
   ): Promise<{ clientId: string; userId: string }> {
-    const clientRes = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { subdomain, timezone: "America/New_York", ...(plan ? { plan } : {}) },
-    });
-    expect(clientRes.statusCode).toBe(201);
-    const clientId = clientRes.json().id as string;
-
-    const userRes = await app.inject({
-      method: "POST",
-      url: `/api/admin/clients/${clientId}/users`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { email, password: PASSWORD },
-    });
-    expect(userRes.statusCode).toBe(201);
-    return { clientId, userId: userRes.json().id as string };
+    return provisionClientWithUser(db.pool, { subdomain, email, plan });
   }
 
   async function loginToken(subdomain: string, email: string): Promise<string> {
@@ -81,7 +65,7 @@ describe("Plan gating and access status", () => {
       method: "POST",
       url: "/api/auth/login",
       headers: { host: host(subdomain) },
-      payload: { email, password: PASSWORD },
+      payload: { email, password: TEST_PASSWORD },
     });
     expect(res.statusCode).toBe(200);
     return res.json().token as string;
@@ -171,7 +155,7 @@ describe("Plan gating and access status", () => {
     it("shows every Client's access status in the single global view", async () => {
       const acme = await provision("acme", "a@acme.test");
       await provision("globex", "b@globex.test");
-      await setPlan(acme.clientId, { accessStatus: "suspended" });
+      await updatePlan(db.pool, acme.clientId, { accessStatus: "suspended" });
 
       const res = await app.inject({
         method: "GET",
@@ -212,13 +196,13 @@ describe("Plan gating and access status", () => {
   describe("Access status gates login", () => {
     it("blocks login for a suspended Client with a clear reason", async () => {
       const { clientId } = await provision("acme", "u@acme.test");
-      await setPlan(clientId, { accessStatus: "suspended" });
+      await updatePlan(db.pool, clientId, { accessStatus: "suspended" });
 
       const res = await app.inject({
         method: "POST",
         url: "/api/auth/login",
         headers: { host: host("acme") },
-        payload: { email: "u@acme.test", password: PASSWORD },
+        payload: { email: "u@acme.test", password: TEST_PASSWORD },
       });
       expect(res.statusCode).toBe(403);
       expect(res.json().error).toBe("client_suspended");
@@ -226,13 +210,13 @@ describe("Plan gating and access status", () => {
 
     it("blocks login for an expired Client with a clear reason", async () => {
       const { clientId } = await provision("acme", "u@acme.test");
-      await setPlan(clientId, { accessStatus: "expired" });
+      await updatePlan(db.pool, clientId, { accessStatus: "expired" });
 
       const res = await app.inject({
         method: "POST",
         url: "/api/auth/login",
         headers: { host: host("acme") },
-        payload: { email: "u@acme.test", password: PASSWORD },
+        payload: { email: "u@acme.test", password: TEST_PASSWORD },
       });
       expect(res.statusCode).toBe(403);
       expect(res.json().error).toBe("client_expired");
@@ -240,14 +224,14 @@ describe("Plan gating and access status", () => {
 
     it("lets login resume once access is restored to active", async () => {
       const { clientId } = await provision("acme", "u@acme.test");
-      await setPlan(clientId, { accessStatus: "suspended" });
-      await setPlan(clientId, { accessStatus: "active" });
+      await updatePlan(db.pool, clientId, { accessStatus: "suspended" });
+      await updatePlan(db.pool, clientId, { accessStatus: "active" });
 
       const res = await app.inject({
         method: "POST",
         url: "/api/auth/login",
         headers: { host: host("acme") },
-        payload: { email: "u@acme.test", password: PASSWORD },
+        payload: { email: "u@acme.test", password: TEST_PASSWORD },
       });
       expect(res.statusCode).toBe(200);
     });
@@ -266,7 +250,7 @@ describe("Plan gating and access status", () => {
       });
       expect(before.statusCode).toBe(200);
 
-      await setPlan(clientId, { accessStatus: "suspended" });
+      await updatePlan(db.pool, clientId, { accessStatus: "suspended" });
 
       const after = await app.inject({
         method: "GET",
@@ -280,7 +264,7 @@ describe("Plan gating and access status", () => {
     it("blocks a plan-gated action for a suspended Client even with a live token", async () => {
       const { clientId } = await provision("acme", "u@acme.test", { tiktok: true });
       const token = await loginToken("acme", "u@acme.test");
-      await setPlan(clientId, { accessStatus: "suspended" });
+      await updatePlan(db.pool, clientId, { accessStatus: "suspended" });
 
       const res = await app.inject({
         method: "GET",
@@ -309,7 +293,7 @@ describe("Plan gating and access status", () => {
         tiktok: true,
       });
 
-      await setPlan(clientId, { facebook: true });
+      await updatePlan(db.pool, clientId, { facebook: true });
       const after = await app.inject({
         method: "GET",
         url: "/api/me",

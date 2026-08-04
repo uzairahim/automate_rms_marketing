@@ -6,8 +6,9 @@ import {
   TEST_BASE_DOMAIN,
   TEST_ENCRYPTION_KEY,
   TEST_META_APP_SECRET,
-  TEST_SUPERADMIN_TOKEN,
 } from "./helpers/app.js";
+import { provisionAndLogin } from "./helpers/provision.js";
+import { updatePlan } from "@smma/core";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher, FAKE_PLATFORM_USER_ID, type PageSpec } from "../src/core/fake-publisher.js";
 import { createSecretCipher } from "../src/core/crypto.js";
@@ -26,10 +27,8 @@ import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
  * Publisher stays the only fake and no real Meta/TikTok call is ever made.
  */
 
-const ADMIN_HOST = `admin.${TEST_BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${TEST_BASE_DOMAIN}`;
 
-const PASSWORD = "correct horse battery";
 
 /** A Page with an eligible IG account linked — the happy path's starting point. */
 const PAGE_WITH_IG: PageSpec = {
@@ -44,8 +43,6 @@ describe("Connecting Instagram and TikTok", () => {
   const clock = new TestClock(new Date("2026-07-16T09:00:00.000Z"));
   const publisher = new FakePublisher();
   const cipher = createSecretCipher(TEST_ENCRYPTION_KEY);
-
-  const adminAuth = { authorization: `Bearer ${TEST_SUPERADMIN_TOKEN}` };
 
   beforeAll(async () => {
     db = await startTestPostgres();
@@ -66,44 +63,12 @@ describe("Connecting Instagram and TikTok", () => {
     clock.set(new Date("2026-07-16T09:00:00.000Z"));
   });
 
-  /** Provision a Client + User with the given Plan, and log in. */
+  /** Provision a Client + User with the given Plan, and log that User in. */
   async function client(
     subdomain = "acme",
     plan: Record<string, boolean> = { facebook: true, instagram: true, tiktok: true },
   ): Promise<{ clientId: string; auth: Record<string, string> }> {
-    const clientRes = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { subdomain, timezone: "America/New_York", plan },
-    });
-    expect(clientRes.statusCode).toBe(201);
-    const clientId = clientRes.json().id as string;
-
-    const email = `u@${subdomain}.test`;
-    const userRes = await app.inject({
-      method: "POST",
-      url: `/api/admin/clients/${clientId}/users`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { email, password: PASSWORD },
-    });
-    expect(userRes.statusCode).toBe(201);
-
-    const loginRes = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      headers: { host: host(subdomain) },
-      payload: { email, password: PASSWORD },
-    });
-    expect(loginRes.statusCode).toBe(200);
-
-    return {
-      clientId,
-      auth: {
-        host: host(subdomain),
-        authorization: `Bearer ${loginRes.json().token as string}`,
-      },
-    };
+    return provisionAndLogin(app, db.pool, { subdomain, plan });
   }
 
   /** Run the whole Facebook handshake through to a connected Page. */
@@ -453,12 +418,7 @@ describe("Connecting Instagram and TikTok", () => {
       const { clientId, auth } = await client();
       const state = await startTikTok(auth);
 
-      await app.inject({
-        method: "PATCH",
-        url: `/api/admin/clients/${clientId}/plan`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { tiktok: false },
-      });
+      await updatePlan(db.pool, clientId, { tiktok: false });
 
       const res = await app.inject({
         method: "POST",
@@ -473,12 +433,7 @@ describe("Connecting Instagram and TikTok", () => {
       const { clientId, auth } = await client();
       const state = await startTikTok(auth);
 
-      await app.inject({
-        method: "PATCH",
-        url: `/api/admin/clients/${clientId}/plan`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { accessStatus: "suspended" },
-      });
+      await updatePlan(db.pool, clientId, { accessStatus: "suspended" });
 
       const res = await app.inject({
         method: "POST",

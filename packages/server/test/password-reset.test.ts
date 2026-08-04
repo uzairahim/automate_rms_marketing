@@ -5,6 +5,7 @@ import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { FakeEmailSender } from "../src/core/fake-email.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
+import { provisionClient, provisionUser } from "./helpers/provision.js";
 
 /**
  * Slice 4 behavioral suite — additional Users and the password-reset lifecycle,
@@ -60,14 +61,8 @@ describe("Additional Users and password reset", () => {
 
   /** Provision a Client and return its id. */
   async function createClient(subdomain: string): Promise<string> {
-    const res = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { subdomain, timezone: "America/New_York" },
-    });
-    expect(res.statusCode).toBe(201);
-    return res.json().id as string;
+    const { clientId } = await provisionClient(db.pool, { subdomain });
+    return clientId;
   }
 
   /** Create a User under a Client and return its id. */
@@ -76,14 +71,11 @@ describe("Additional Users and password reset", () => {
     userEmail: string,
     password = PASSWORD,
   ): Promise<string> {
-    const res = await app.inject({
-      method: "POST",
-      url: `/api/admin/clients/${clientId}/users`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { email: userEmail, password },
+    const { userId } = await provisionUser(db.pool, clientId, {
+      email: userEmail,
+      password,
     });
-    expect(res.statusCode).toBe(201);
-    return res.json().id as string;
+    return userId;
   }
 
   function loginStatus(subdomain: string, userEmail: string, password: string) {
@@ -119,8 +111,16 @@ describe("Additional Users and password reset", () => {
   describe("Additional Users", () => {
     it("lets the Superadmin add more than one User to a Client", async () => {
       const clientId = await createClient("acme");
-      await createUser(clientId, "first@acme.test");
-      await createUser(clientId, "second@acme.test");
+      // The Superadmin's own act, so it is driven through the admin route.
+      for (const userEmail of ["first@acme.test", "second@acme.test"]) {
+        const res = await app.inject({
+          method: "POST",
+          url: `/api/admin/clients/${clientId}/users`,
+          headers: { host: ADMIN_HOST, ...adminAuth },
+          payload: { email: userEmail, password: PASSWORD },
+        });
+        expect(res.statusCode).toBe(201);
+      }
 
       const { rows } = await db.pool.query<{ count: string }>(
         "SELECT count(*)::text AS count FROM users WHERE client_id = $1",

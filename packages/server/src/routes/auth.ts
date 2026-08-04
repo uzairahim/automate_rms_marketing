@@ -10,7 +10,7 @@ import {
   authenticateClientRequest,
   resolveClientForRequest,
 } from "../auth/guards.js";
-import type { Client } from "../tenancy/clients.js";
+import type { Client } from "@smma/core";
 
 /**
  * Client-facing authentication (PRD stories 14, 17): a User logs in with email +

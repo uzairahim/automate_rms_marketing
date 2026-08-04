@@ -4,8 +4,7 @@ import type { Publisher } from "../core/publisher.js";
 import type { SecretCipher } from "../core/crypto.js";
 import { recomputePostStatus, publishPost } from "./publish.js";
 import { findDuePosts, listTargets, recordTargetOutcome } from "./posts.js";
-import { findClientById, type Client } from "../tenancy/clients.js";
-import { accessBlock } from "../tenancy/eligibility.js";
+import { accessBlock, findClientById, type Client } from "@smma/core";
 
 /**
  * The scheduler's minute tick (PRD stories 35, 44–45; issue #11).

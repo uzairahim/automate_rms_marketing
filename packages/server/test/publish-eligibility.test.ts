@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, TEST_BASE_DOMAIN } from "./helpers/app.js";
+import { buildTestApp } from "./helpers/app.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher, type PageSpec } from "../src/core/fake-publisher.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
 import { publishDuePosts, GRACE_WINDOW_MS } from "../src/posts/scheduling.js";
 import { retryDueTargets } from "../src/posts/retry.js";
 import { RETRY_INTERVAL_MS } from "../src/posts/publish.js";
-import { createClient, createUser } from "../src/tenancy/clients.js";
-import { updatePlan } from "../src/tenancy/plan.js";
+import { updatePlan } from "@smma/core";
+import { provisionAndLogin } from "./helpers/provision.js";
 
 /**
  * Slice 1 behavioral suite — publish eligibility re-checked at fire time
@@ -23,14 +23,11 @@ import { updatePlan } from "../src/tenancy/plan.js";
  * the assertions are on the {@link FakePublisher}: a blocked Target must leave
  * `sent` empty, not merely end up `failed`.
  *
- * Suspension and downgrade are set up by calling the tenancy provisioning
- * functions directly rather than through the Superadmin HTTP API — that API is
- * removed in the next slice, and provisioning is setup here, never the
- * behavior under assertion.
+ * Suspension and downgrade are set up through `@smma/core` rather than the
+ * Superadmin HTTP API — that API moves to its own service, and provisioning is
+ * setup here, never the behavior under assertion.
  */
 
-const host = (subdomain: string) => `${subdomain}.${TEST_BASE_DOMAIN}`;
-const PASSWORD = "correct horse battery";
 const NOW = new Date("2026-07-20T09:00:00.000Z");
 
 const PAGE_WITH_IG: PageSpec = {
@@ -73,29 +70,7 @@ describe("Publish eligibility at fire time", () => {
     subdomain = "acme",
     plan: PlanToggles = { facebook: true, instagram: true, tiktok: true },
   ): Promise<{ clientId: string; auth: Record<string, string> }> {
-    const created = await createClient(db.pool, {
-      subdomain,
-      timezone: "America/New_York",
-      plan,
-    });
-    const email = `u@${subdomain}.test`;
-    await createUser(db.pool, { clientId: created.id, email, password: PASSWORD });
-
-    const loginRes = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      headers: { host: host(subdomain) },
-      payload: { email, password: PASSWORD },
-    });
-    expect(loginRes.statusCode).toBe(200);
-
-    return {
-      clientId: created.id,
-      auth: {
-        host: host(subdomain),
-        authorization: `Bearer ${loginRes.json().token as string}`,
-      },
-    };
+    return provisionAndLogin(app, db.pool, { subdomain, plan });
   }
 
   async function connectPlatforms(

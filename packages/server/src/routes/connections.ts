@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { accessDenied, authenticateClientRequest } from "../auth/guards.js";
-import { isPlatform, planEnables } from "../tenancy/plan.js";
+import { findClientById, isPlatform, planEnables } from "@smma/core";
 import { PLATFORMS, PublisherError, type Platform } from "../core/publisher.js";
 import {
   attachCredentialToState,
@@ -16,7 +16,6 @@ import {
   openAccountCredential,
   type ConnectedAccount,
 } from "../connections/accounts.js";
-import { findClientById } from "../tenancy/clients.js";
 
 /**
  * Connecting a Client's social destinations (PRD stories 18–28).

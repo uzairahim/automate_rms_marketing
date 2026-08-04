@@ -1,5 +1,4 @@
-import type { Platform } from "../core/publisher.js";
-import { planEnables, type AccessStatus, type Plan } from "./plan.js";
+import { planEnables, type AccessStatus, type Plan, type Platform } from "./plan.js";
 
 /**
  * "May this Client publish to this platform right now?" — the one rule, asked
@@ -9,9 +8,10 @@ import { planEnables, type AccessStatus, type Plan } from "./plan.js";
  * the Client at the moment something publishes, and those two moments are days
  * apart for a Scheduled Post. So the rule is deliberately consulted twice:
  *
- *   - at compose time by `routes/posts.ts`, so a User is told while they can
- *     still act on it ("this Client's plan does not include facebook");
- *   - at fire time by `posts/publish.js`'s `attemptPublish`, per Target,
+ *   - at compose time by `@smma/server`'s `routes/posts.ts`, so a User is told
+ *     while they can still act on it ("this Client's plan does not include
+ *     facebook");
+ *   - at fire time by `@smma/server`'s `posts/publish.ts` `attemptPublish`, per Target,
  *     immediately before anything reaches a Publisher — which covers the
  *     scheduler's fan-out, the auto-retry tick, and a User's manual retry alike.
  *

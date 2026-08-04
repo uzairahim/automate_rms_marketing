@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateClientRequest } from "../auth/guards.js";
-import { enabledPlatforms, isPlatform, planEnables } from "../tenancy/plan.js";
+import { enabledPlatforms, isPlatform, planEnables } from "@smma/core";
 
 /**
  * Plan-scoped platform surface (PRD story 27). A User only ever sees and acts on

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import type { Clock } from "../core/clock.js";
-import { verifyPassword } from "./passwords.js";
+import { verifyPassword } from "@smma/core";
 
 /**
  * User login and session resolution — the read side of the tenancy spine.

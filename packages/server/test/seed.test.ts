@@ -3,8 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { buildTestApp, TEST_BASE_DOMAIN } from "./helpers/app.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
 import { seed, seedOptionsFromEnv, DEFAULT_SEED, type SeedOptions } from "../src/db/seed.js";
-import { ProvisionError } from "../src/tenancy/errors.js";
-import { createClient, createUser } from "../src/tenancy/clients.js";
+import { createClient, createUser, ProvisionError } from "@smma/core";
 
 /**
  * The development seeder.

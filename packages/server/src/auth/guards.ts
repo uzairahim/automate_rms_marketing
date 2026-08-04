@@ -1,7 +1,10 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { resolveSurface } from "../tenancy/subdomain.js";
-import { findClientBySubdomain, type Client } from "../tenancy/clients.js";
-import type { AccessStatus } from "../tenancy/plan.js";
+import {
+  findClientBySubdomain,
+  resolveSurface,
+  type AccessStatus,
+  type Client,
+} from "@smma/core";
 import { resolveSession, type SessionUser } from "./sessions.js";
 
 /**

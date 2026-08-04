@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type pg from "pg";
 import type { Clock } from "../core/clock.js";
 import type { EmailSender } from "../core/email.js";
-import { hashPassword, isStrongPassword, WEAK_PASSWORD_MESSAGE } from "./passwords.js";
+import { hashPassword, isStrongPassword, WEAK_PASSWORD_MESSAGE } from "@smma/core";
 
 /**
  * Self-service password reset (Slice 4). A User who forgets their password

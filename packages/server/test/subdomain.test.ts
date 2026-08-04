@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveSurface, isValidSubdomain } from "../src/tenancy/subdomain.js";
+import { resolveSurface, isValidSubdomain } from "@smma/core";
 
 // Pure, DB-free unit tests for the subdomain routing rules. The behavioral
 // consequences (admin gating, tenant scoping) are covered in tenancy.test.ts.

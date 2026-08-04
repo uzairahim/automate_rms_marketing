@@ -4,7 +4,6 @@ import {
   buildTestApp,
   TEST_BASE_DOMAIN,
   TEST_ENCRYPTION_KEY,
-  TEST_SUPERADMIN_TOKEN,
 } from "./helpers/app.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher, type PageSpec } from "../src/core/fake-publisher.js";
@@ -12,6 +11,7 @@ import { createSecretCipher } from "../src/core/crypto.js";
 import { recordDailySnapshots, snapshotDateFor } from "../src/analytics/snapshot-job.js";
 import { retryDueTargets } from "../src/posts/retry.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
+import { provisionAndLogin } from "./helpers/provision.js";
 
 /**
  * Slice 12 behavioral suite — the dashboard and what feeds it (ADR 0004).
@@ -29,9 +29,7 @@ import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
  * fact the test just states rather than waits for.
  */
 
-const ADMIN_HOST = `admin.${TEST_BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${TEST_BASE_DOMAIN}`;
-const PASSWORD = "correct horse battery";
 const NOW = new Date("2026-07-20T12:00:00.000Z");
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -74,8 +72,6 @@ describe("Account-level analytics dashboard + daily snapshot job", () => {
   const publisher = new FakePublisher();
   const cipher = createSecretCipher(TEST_ENCRYPTION_KEY);
 
-  const adminAuth = { authorization: `Bearer ${TEST_SUPERADMIN_TOKEN}` };
-
   beforeAll(async () => {
     db = await startTestPostgres();
     app = buildTestApp({ pool: db.pool, clock, publisher });
@@ -96,44 +92,16 @@ describe("Account-level analytics dashboard + daily snapshot job", () => {
     clock.set(NOW);
   });
 
+  /** Provision an all-platforms Client + User, and log that User in. */
   async function client(
     subdomain = "acme",
     timezone = "America/New_York",
   ): Promise<{ clientId: string; auth: Record<string, string> }> {
-    const clientRes = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: {
-        subdomain,
-        timezone,
-        plan: { facebook: true, instagram: true, tiktok: true },
-      },
+    return provisionAndLogin(app, db.pool, {
+      subdomain,
+      timezone,
+      plan: { facebook: true, instagram: true, tiktok: true },
     });
-    expect(clientRes.statusCode).toBe(201);
-    const clientId = clientRes.json().id as string;
-
-    const email = `u@${subdomain}.test`;
-    const userRes = await app.inject({
-      method: "POST",
-      url: `/api/admin/clients/${clientId}/users`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { email, password: PASSWORD },
-    });
-    expect(userRes.statusCode).toBe(201);
-
-    const loginRes = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      headers: { host: host(subdomain) },
-      payload: { email, password: PASSWORD },
-    });
-    expect(loginRes.statusCode).toBe(200);
-
-    return {
-      clientId,
-      auth: { host: host(subdomain), authorization: `Bearer ${loginRes.json().token as string}` },
-    };
   }
 
   async function connectPlatforms(

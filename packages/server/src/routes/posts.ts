@@ -1,8 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type pg from "pg";
 import { accessDenied, authenticateClientRequest } from "../auth/guards.js";
-import { isPlatform, type Plan } from "../tenancy/plan.js";
-import { publishBlock } from "../tenancy/eligibility.js";
+import { isPlatform, publishBlock, type Plan } from "@smma/core";
 import type { Clock } from "../core/clock.js";
 import type { Platform } from "../core/publisher.js";
 import { findAccount } from "../connections/accounts.js";

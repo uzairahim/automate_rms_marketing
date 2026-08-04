@@ -4,8 +4,8 @@ import {
   buildTestApp,
   TEST_BASE_DOMAIN,
   TEST_ENCRYPTION_KEY,
-  TEST_SUPERADMIN_TOKEN,
 } from "./helpers/app.js";
+import { provisionAndLogin } from "./helpers/provision.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher } from "../src/core/fake-publisher.js";
 import { createSecretCipher } from "../src/core/crypto.js";
@@ -30,9 +30,7 @@ import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
  * with the Publisher as the only fake — no real Meta call is ever made.
  */
 
-const ADMIN_HOST = `admin.${TEST_BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${TEST_BASE_DOMAIN}`;
-const PASSWORD = "correct horse battery";
 const NOW = new Date("2026-07-24T09:00:00.000Z");
 
 /** A long-lived Page token, exactly as a Client would paste it from Graph Explorer. */
@@ -45,8 +43,6 @@ describe("Bring-your-own-token fallback (Meta)", () => {
   const clock = new TestClock(NOW);
   const publisher = new FakePublisher();
   const cipher = createSecretCipher(TEST_ENCRYPTION_KEY);
-
-  const adminAuth = { authorization: `Bearer ${TEST_SUPERADMIN_TOKEN}` };
 
   beforeAll(async () => {
     db = await startTestPostgres();
@@ -68,44 +64,12 @@ describe("Bring-your-own-token fallback (Meta)", () => {
     clock.set(NOW);
   });
 
-  /** Provision a Client + User with the given Plan, and log in. */
+  /** Provision a Client + User with the given Plan, and log that User in. */
   async function client(
     subdomain = "acme",
     plan: Record<string, boolean> = { facebook: true, instagram: true, tiktok: true },
   ): Promise<{ clientId: string; auth: Record<string, string> }> {
-    const clientRes = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { subdomain, timezone: "America/New_York", plan },
-    });
-    expect(clientRes.statusCode).toBe(201);
-    const clientId = clientRes.json().id as string;
-
-    const email = `u@${subdomain}.test`;
-    const userRes = await app.inject({
-      method: "POST",
-      url: `/api/admin/clients/${clientId}/users`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { email, password: PASSWORD },
-    });
-    expect(userRes.statusCode).toBe(201);
-
-    const loginRes = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      headers: { host: host(subdomain) },
-      payload: { email, password: PASSWORD },
-    });
-    expect(loginRes.statusCode).toBe(200);
-
-    return {
-      clientId,
-      auth: {
-        host: host(subdomain),
-        authorization: `Bearer ${loginRes.json().token as string}`,
-      },
-    };
+    return provisionAndLogin(app, db.pool, { subdomain, plan });
   }
 
   /** Paste a long-lived Page token into the Facebook slot. */

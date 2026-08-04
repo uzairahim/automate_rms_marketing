@@ -7,15 +7,17 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n infra,api,worker,web -c blue,green,magenta,cyan \"npm:dev:infra\" \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
+    "dev": "npm run build:core && concurrently -n infra,core,api,worker,web -c blue,yellow,green,magenta,cyan \"npm:dev:infra\" \"npm:dev:core\" \"npm:dev:api\" \"npm:dev:worker\" \"npm:dev:web\"",
     "dev:infra": "docker compose up",
+    "dev:core": "npm -w @smma/core run dev",
     "dev:api": "npm -w @smma/server run dev:api",
     "dev:worker": "npm -w @smma/server run dev:worker",
     "dev:web": "npm -w @smma/web run dev",
-    "migrate": "npm -w @smma/server run migrate",
-    "seed": "npm -w @smma/server run seed",
-    "build": "npm -w @smma/server run build && npm -w @smma/web run build",
-    "typecheck": "npm -w @smma/server run typecheck && npm -w @smma/web run typecheck",
+    "migrate": "npm run build:core && npm -w @smma/server run migrate",
+    "seed": "npm run build:core && npm -w @smma/server run seed",
+    "build:core": "npm -w @smma/core run build",
+    "build": "npm run build:core && npm -w @smma/server run build && npm -w @smma/web run build",
+    "typecheck": "npm run build:core && npm -w @smma/server run typecheck && npm -w @smma/web run typecheck",
     "test": "npm -w @smma/server run test"
   },
   "devDependencies": {

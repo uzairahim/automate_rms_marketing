@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { buildTestApp, TEST_BASE_DOMAIN, TEST_SUPERADMIN_TOKEN } from "./helpers/app.js";
+import { buildTestApp, TEST_BASE_DOMAIN } from "./helpers/app.js";
+import { provisionAndLogin } from "./helpers/provision.js";
 import { TestClock } from "../src/core/clock.js";
 import { FakePublisher, type PageSpec } from "../src/core/fake-publisher.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
@@ -15,9 +16,7 @@ import { retryDueTargets } from "../src/posts/retry.js";
  * deterministic — no real Meta/TikTok call is ever made (PRD Testing Decisions).
  */
 
-const ADMIN_HOST = `admin.${TEST_BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${TEST_BASE_DOMAIN}`;
-const PASSWORD = "correct horse battery";
 const NOW = new Date("2026-07-20T09:00:00.000Z");
 
 const PAGE_WITH_IG: PageSpec = {
@@ -32,8 +31,6 @@ describe("Compose + validate-and-gate + immediate publish", () => {
   let mediaDir: string;
   const clock = new TestClock(NOW);
   const publisher = new FakePublisher();
-
-  const adminAuth = { authorization: `Bearer ${TEST_SUPERADMIN_TOKEN}` };
 
   beforeAll(async () => {
     db = await startTestPostgres();
@@ -71,44 +68,12 @@ describe("Compose + validate-and-gate + immediate publish", () => {
     return res.json().id as string;
   }
 
-  /** Provision a Client + User with the given Plan, and log in. */
+  /** Provision a Client + User with the given Plan, and log that User in. */
   async function client(
     subdomain = "acme",
     plan: Record<string, boolean> = { facebook: true, instagram: true, tiktok: true },
   ): Promise<{ clientId: string; auth: Record<string, string> }> {
-    const clientRes = await app.inject({
-      method: "POST",
-      url: "/api/admin/clients",
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { subdomain, timezone: "America/New_York", plan },
-    });
-    expect(clientRes.statusCode).toBe(201);
-    const clientId = clientRes.json().id as string;
-
-    const email = `u@${subdomain}.test`;
-    const userRes = await app.inject({
-      method: "POST",
-      url: `/api/admin/clients/${clientId}/users`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: { email, password: PASSWORD },
-    });
-    expect(userRes.statusCode).toBe(201);
-
-    const loginRes = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      headers: { host: host(subdomain) },
-      payload: { email, password: PASSWORD },
-    });
-    expect(loginRes.statusCode).toBe(200);
-
-    return {
-      clientId,
-      auth: {
-        host: host(subdomain),
-        authorization: `Bearer ${loginRes.json().token as string}`,
-      },
-    };
+    return provisionAndLogin(app, db.pool, { subdomain, plan });
   }
 
   /** Connect Facebook (and, if asked, Instagram/TikTok) for a logged-in Client. */
