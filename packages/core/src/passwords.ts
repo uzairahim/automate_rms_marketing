@@ -25,6 +25,17 @@ export function isStrongPassword(plaintext: string): boolean {
   return plaintext.length >= MIN_PASSWORD_LENGTH;
 }
 
+/**
+ * A real bcrypt hash (cost 12) of a value nobody will match.
+ *
+ * Every login path compares against this when the email is unknown, so that a
+ * missing account and a wrong password take indistinguishable time and neither
+ * form can be used to discover who exists. Shared so the two of them cannot
+ * quietly diverge in cost — a cheaper hash on one surface is a timing signal.
+ */
+export const DUMMY_PASSWORD_HASH =
+  "$2a$12$PPAvF.2H4T9DXVsrN/M12uskhulyNd1bmA4CnuaLbT51DC1myBQ06";
+
 export async function hashPassword(plaintext: string): Promise<string> {
   return bcrypt.hash(plaintext, BCRYPT_COST);
 }

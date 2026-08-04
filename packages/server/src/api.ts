@@ -1,7 +1,7 @@
 import "./load-env.js";
 import { Queue } from "bullmq";
+import { createPool, waitForPostgres } from "@smma/core";
 import { loadConfig } from "./config.js";
-import { createPool, waitForPostgres } from "./db/pool.js";
 import { runMigrations } from "./db/migrate.js";
 import { buildApp } from "./app.js";
 import { SystemClock } from "./core/clock.js";

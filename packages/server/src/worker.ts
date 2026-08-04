@@ -1,6 +1,6 @@
 import "./load-env.js";
+import { createPool, waitForPostgres } from "@smma/core";
 import { loadConfig } from "./config.js";
-import { createPool, waitForPostgres } from "./db/pool.js";
 import { runMigrations } from "./db/migrate.js";
 import { redisConnection } from "./queue/health-queue.js";
 import { startHealthWorker } from "./worker/health-worker.js";

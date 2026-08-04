@@ -1,5 +1,5 @@
 import pg from "pg";
-import { isMainModule, ProvisionError } from "@smma/core";
+import { isMainModule, ProvisionError, waitForPostgres } from "@smma/core";
 import { upsertSuperadmin } from "./auth/superadmins.js";
 import { lineReader, type LineReader } from "./prompt.js";
 
@@ -76,7 +76,6 @@ function ttyPrompts(reader: LineReader, email?: string): CreateSuperadminPrompts
 
 // CLI entrypoint: `npm -w @smma/admin run create-superadmin [email]`.
 if (isMainModule(import.meta.url)) {
-  const { waitForPostgres } = await import("./db/pool.js");
   const { runAdminMigrations } = await import("./db/migrate.js");
   await import("./load-env.js");
 

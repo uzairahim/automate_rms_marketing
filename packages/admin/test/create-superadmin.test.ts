@@ -59,13 +59,13 @@ describe("create-superadmin", () => {
   });
 
   it("works on a database that has only ever seen the admin migrations", async () => {
-    // The whole point of a separate deployable: no `clients`, no `users`, no
-    // Client-facing service ever pointed at this database.
+    // The whole point of a separate deployable: the Client-facing service need
+    // never have been deployed against this database at all.
     const { rows } = await db.pool.query<{ table_name: string }>(
-      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name IN ('clients', 'users', 'sessions')`,
     );
-    const tables = rows.map((r) => r.table_name).sort();
-    expect(tables).toEqual(["admin_sessions", "schema_migrations", "superadmins"]);
+    expect(rows).toEqual([]);
 
     await runCreateSuperadmin(db.pool, answering(EMAIL, PASSWORD));
     expect((await login(EMAIL, PASSWORD)).statusCode).toBe(200);

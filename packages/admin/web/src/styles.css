@@ -5,6 +5,11 @@
  * operator's own tool, it carries no Client's Branding, and it should never be
  * mistaken at a glance for a screen a Client could be looking at. Dense, neutral,
  * system-font — a console, not a product surface.
+ *
+ * Hand-written rather than `@smma/web`'s Tailwind, because the whole value of
+ * that setup there is the Clay design tokens — which this panel must not adopt,
+ * since they are the Client-facing look. Pulling in the toolchain to reach none
+ * of its vocabulary would buy a dependency and no consistency.
  */
 
 :root {

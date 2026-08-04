@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import type { Clock } from "../core/clock.js";
-import { verifyPassword } from "@smma/core";
+import { DUMMY_PASSWORD_HASH, verifyPassword } from "@smma/core";
 
 /**
  * User login and session resolution — the read side of the tenancy spine.
@@ -55,7 +55,7 @@ export async function login(
   if (!row) {
     // Still spend the cost of a hash comparison so a missing user and a wrong
     // password take indistinguishable time (mitigates user-enumeration timing).
-    await verifyPassword(input.password, DUMMY_HASH);
+    await verifyPassword(input.password, DUMMY_PASSWORD_HASH);
     throw new AuthError();
   }
   if (!(await verifyPassword(input.password, row.password_hash))) {
@@ -103,7 +103,3 @@ export async function resolveSession(
 
   return { id: row.id, clientId: row.client_id, email: row.email };
 }
-
-// A real bcrypt hash (cost 12) of a value no user will match, used only to keep
-// login timing uniform when the email is unknown, so the comparison does real work.
-const DUMMY_HASH = "$2a$12$PPAvF.2H4T9DXVsrN/M12uskhulyNd1bmA4CnuaLbT51DC1myBQ06";

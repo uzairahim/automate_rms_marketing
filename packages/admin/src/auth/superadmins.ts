@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import {
+  DUMMY_PASSWORD_HASH,
   hashPassword,
   isStrongPassword,
   isValidEmail,
@@ -22,6 +23,10 @@ import type { Clock } from "../clock.js";
  *
  * Every failure is the same failure, so the login form cannot be used to
  * discover which operator accounts exist.
+ *
+ * On naming: the *person* is a Superadmin, never an "admin" (CONTEXT.md
+ * `Superadmin`, _Avoid_: Admin). `admin` names only the service, its surface,
+ * and its `admin_sessions` table — the session record this Superadmin holds.
  */
 
 /**
@@ -31,10 +36,10 @@ import type { Clock } from "../clock.js";
  */
 export const ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
 
-export class AdminAuthError extends Error {
+export class SuperadminAuthError extends Error {
   constructor(readonly code: "invalid_credentials" = "invalid_credentials") {
     super("Invalid email or password.");
-    this.name = "AdminAuthError";
+    this.name = "SuperadminAuthError";
   }
 }
 
@@ -96,7 +101,7 @@ export async function upsertSuperadmin(
 /**
  * Authenticate a Superadmin and open a session.
  *
- * @throws {AdminAuthError} if no Superadmin has that email, or the password does
+ * @throws {SuperadminAuthError} if no Superadmin has that email, or the password does
  * not match — the two are indistinguishable to the caller.
  */
 export async function authenticateSuperadmin(
@@ -114,11 +119,11 @@ export async function authenticateSuperadmin(
   if (!row) {
     // Still spend the cost of a hash comparison so an unknown email and a wrong
     // password take indistinguishable time (mitigates account-enumeration timing).
-    await verifyPassword(input.password, DUMMY_HASH);
-    throw new AdminAuthError();
+    await verifyPassword(input.password, DUMMY_PASSWORD_HASH);
+    throw new SuperadminAuthError();
   }
   if (!(await verifyPassword(input.password, row.password_hash))) {
-    throw new AdminAuthError();
+    throw new SuperadminAuthError();
   }
 
   const token = randomBytes(32).toString("base64url");
@@ -159,7 +164,3 @@ export async function resolveAdminSession(
 export async function endAdminSession(pool: pg.Pool, token: string): Promise<void> {
   await pool.query(`DELETE FROM admin_sessions WHERE token = $1`, [token]);
 }
-
-// A real bcrypt hash (cost 12) of a value no one will match, used only to keep
-// login timing uniform when the email is unknown, so the comparison does real work.
-const DUMMY_HASH = "$2a$12$PPAvF.2H4T9DXVsrN/M12uskhulyNd1bmA4CnuaLbT51DC1myBQ06";

@@ -3,18 +3,20 @@ import pg from "pg";
 const { Pool } = pg;
 
 /**
- * A Postgres connection pool. One shared pool per process (the API and the
- * worker each create their own). Tests create a pool against an ephemeral
- * Testcontainers Postgres.
+ * Reaching the shared Postgres — here for the same reason the migration runner
+ * is (ADR 0010): both deployables connect to one database, so how they connect
+ * to it is not something either of them owns privately.
  */
+
+/** A Postgres connection pool. One shared pool per process. */
 export function createPool(databaseUrl: string): pg.Pool {
   return new Pool({ connectionString: databaseUrl });
 }
 
 /**
  * Wait until Postgres accepts a query, retrying on connection errors. On a cold
- * `npm run dev` the API/worker start alongside `docker compose up`, so Postgres
- * may not be ready for the first few seconds — without this the entrypoint would
+ * `npm run dev` the processes start alongside `docker compose up`, so Postgres
+ * may not be ready for the first few seconds — without this an entrypoint would
  * throw and `tsx watch` would not restart until a file changed.
  */
 export async function waitForPostgres(
@@ -36,5 +38,3 @@ export async function waitForPostgres(
     { cause: lastErr },
   );
 }
-
-export type { Pool } from "pg";

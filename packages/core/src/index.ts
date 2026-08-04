@@ -65,6 +65,7 @@ export {
 export { isValidEmail, normalizeEmail } from "./emails.js";
 
 export {
+  DUMMY_PASSWORD_HASH,
   MIN_PASSWORD_LENGTH,
   WEAK_PASSWORD_MESSAGE,
   hashPassword,
@@ -79,9 +80,12 @@ export {
   type PublishBlockReason,
 } from "./eligibility.js";
 
-// The mechanism both deployables migrate one shared database through, and the
-// entrypoint guard both their CLIs use. Not domain, but shared *because* the
-// database is shared — two copies of either would drift apart against it.
+// The mechanism both deployables migrate one shared database through, how they
+// reach it, and the entrypoint guard both their CLIs use. Not domain, but shared
+// *because* the database is shared — two copies of the runner would drift apart
+// about what "already applied" means, against one tracking table.
 export { runMigrations, type Migration } from "./migrations.js";
+
+export { createPool, waitForPostgres } from "./pool.js";
 
 export { isMainModule } from "./cli.js";

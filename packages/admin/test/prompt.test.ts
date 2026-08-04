@@ -71,10 +71,19 @@ describe("The CLI's prompt", () => {
     reader.close();
   });
 
-  it("trims the answer, so a stray space cannot become part of a password", async () => {
+  it("trims a visible answer, where a stray space is a slip", async () => {
     const { reader } = reading("  operator@ourapp.test  \n");
 
     expect(await reader.ask("Email: ")).toBe("operator@ourapp.test");
+    reader.close();
+  });
+
+  it("leaves a secret exactly as typed, spaces and all", async () => {
+    // Trimming would store a different password than the operator entered, and
+    // they would then be unable to sign in with what they typed.
+    const { reader } = reading("  a password with edges  \n");
+
+    expect(await reader.ask("Password: ", true)).toBe("  a password with edges  ");
     reader.close();
   });
 });

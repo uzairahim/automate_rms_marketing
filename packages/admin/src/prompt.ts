@@ -61,7 +61,11 @@ export function lineReader(
           // prompt does not land on the same line as an invisible answer.
           if (secret) echo.write("\n");
           if (line === null) reject(new Error(`No input received for: ${question.trim()}`));
-          else resolve(line.trim());
+          // A visible answer is trimmed, because a stray space around a typed
+          // email is a slip. A secret is not: trimming it would store a
+          // different password than the one the operator typed, and they would
+          // then be unable to sign in with what they entered.
+          else resolve(secret ? line : line.trim());
         };
         const buffered = ready.shift();
         if (buffered !== undefined) take(buffered);

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import {
-  AdminAuthError,
+  SuperadminAuthError,
   authenticateSuperadmin,
   endAdminSession,
   type Superadmin,
@@ -44,7 +44,7 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         setSessionCookie(reply, token, app.adminDeps.cookieSecure);
         return reply.code(200).send({ superadmin: superadminView(superadmin) });
       } catch (err) {
-        if (err instanceof AdminAuthError) {
+        if (err instanceof SuperadminAuthError) {
           // Identical for an unknown email and a wrong password: the form must
           // not be usable to discover which operator accounts exist.
           return reply.code(401).send({ error: err.code });

@@ -6,6 +6,7 @@ import {
   isMainModule,
   ProvisionError,
   setUserPassword,
+  waitForPostgres,
   type PlanPatch,
 } from "@smma/core";
 
@@ -119,7 +120,6 @@ export function seedOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): SeedOp
 
 // CLI entrypoint: `npm run seed`.
 if (isMainModule(import.meta.url)) {
-  const { waitForPostgres } = await import("./pool.js");
   const { runMigrations } = await import("./migrate.js");
   await import("../load-env.js");
 

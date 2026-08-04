@@ -100,7 +100,7 @@ describe("Superadmin identity and login", () => {
     expect(res.json().error).toBe("invalid_body");
   });
 
-  it("expires a session on its own, well before the Client's 30 days", async () => {
+  it("expires a session on its own", async () => {
     const { cookies } = await loginAs(app, { email: EMAIL, password: PASSWORD });
 
     // An unattended browser must not stay authorized indefinitely — checked
@@ -109,10 +109,19 @@ describe("Superadmin identity and login", () => {
     expect((await app.inject({ method: "GET", url: "/api/me", cookies })).statusCode).toBe(200);
 
     clock.advance(2000);
-    const after = await app.inject({ method: "GET", url: "/api/me", cookies });
+    expect((await app.inject({ method: "GET", url: "/api/me", cookies })).statusCode).toBe(401);
+  });
 
-    expect(after.statusCode).toBe(401);
-    expect(ADMIN_SESSION_TTL_MS).toBeLessThan(30 * 24 * 60 * 60 * 1000);
+  it("is dead by the next day, unlike a Client's 30-day session", async () => {
+    // The operator's credential can suspend every Client on the platform, so it
+    // outlives an unattended browser by far less than a User's does. Stated as
+    // behavior — a day later it simply does not work — rather than by reading
+    // the constant back out of the module that set it.
+    const { cookies } = await loginAs(app, { email: EMAIL, password: PASSWORD });
+
+    clock.advance(24 * 60 * 60 * 1000);
+
+    expect((await app.inject({ method: "GET", url: "/api/me", cookies })).statusCode).toBe(401);
   });
 
   it("ends the session on logout, leaving the shell unreachable", async () => {

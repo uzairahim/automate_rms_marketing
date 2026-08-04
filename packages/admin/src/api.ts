@@ -1,6 +1,6 @@
 import "./load-env.js";
+import { createPool, waitForPostgres } from "@smma/core";
 import { loadAdminConfig } from "./config.js";
-import { createPool, waitForPostgres } from "./db/pool.js";
 import { runAdminMigrations } from "./db/migrate.js";
 import { buildAdminApp } from "./app.js";
 import { SystemClock } from "./clock.js";

@@ -1,5 +1,5 @@
 import pg from "pg";
-import { isMainModule, runMigrations } from "@smma/core";
+import { isMainModule, runMigrations, waitForPostgres } from "@smma/core";
 import { adminMigrations } from "./migrations.js";
 
 /**
@@ -16,7 +16,6 @@ export async function runAdminMigrations(pool: pg.Pool): Promise<void> {
 
 // CLI entrypoint: `npm -w @smma/admin run migrate`.
 if (isMainModule(import.meta.url)) {
-  const { waitForPostgres } = await import("./pool.js");
   await import("../load-env.js");
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
