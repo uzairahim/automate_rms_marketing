@@ -13,12 +13,16 @@
     "dev:api": "npm -w @smma/server run dev:api",
     "dev:worker": "npm -w @smma/server run dev:worker",
     "dev:web": "npm -w @smma/web run dev",
+    "dev:admin": "npm run build:core && concurrently -n admin-api,admin-web -c green,cyan \"npm:dev:admin:api\" \"npm:dev:admin:web\"",
+    "dev:admin:api": "npm -w @smma/admin run dev:api",
+    "dev:admin:web": "npm -w @smma/admin run dev:web",
+    "create-superadmin": "npm run build:core && npm -w @smma/admin run create-superadmin --",
     "migrate": "npm run build:core && npm -w @smma/server run migrate",
     "seed": "npm run build:core && npm -w @smma/server run seed",
     "build:core": "npm -w @smma/core run build",
-    "build": "npm run build:core && npm -w @smma/server run build && npm -w @smma/web run build",
-    "typecheck": "npm run build:core && npm -w @smma/server run typecheck && npm -w @smma/web run typecheck",
-    "test": "npm -w @smma/server run test"
+    "build": "npm run build:core && npm -w @smma/server run build && npm -w @smma/web run build && npm -w @smma/admin run build",
+    "typecheck": "npm run build:core && npm -w @smma/server run typecheck && npm -w @smma/web run typecheck && npm -w @smma/admin run typecheck",
+    "test": "npm -w @smma/server run test && npm -w @smma/admin run test"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

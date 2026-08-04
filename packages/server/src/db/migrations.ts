@@ -1,5 +1,10 @@
+import type { Migration } from "@smma/core";
+
 /**
- * Ordered schema migrations, applied by {@link ./migrate.ts}.
+ * The Client-facing service's ordered schema migrations, applied by
+ * {@link ./migrate.ts}. The Superadmin service owns its own list, under an
+ * `admin_` name prefix (ADR 0010); these are the tables only this service reads
+ * and writes.
  *
  * Each entry runs exactly once, tracked in `schema_migrations`. Never edit or
  * reorder an already-shipped migration — append a new one. Migrations are kept
@@ -11,10 +16,7 @@
  * The real domain tables (Client, User, Connected Account, Post, Target,
  * Metric Snapshot) arrive in later slices.
  */
-export interface Migration {
-  name: string;
-  sql: string;
-}
+export type { Migration };
 
 export const migrations: readonly Migration[] = [
   {

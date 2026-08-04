@@ -2,7 +2,9 @@ import { pathToFileURL } from "node:url";
 
 /**
  * Whether this module is the one Node was asked to run — the guard that lets a
- * file be both an importable module and a CLI entrypoint.
+ * file be both an importable module and a CLI entrypoint. Both deployables have
+ * such entrypoints (`migrate`, `seed`, `create-superadmin`), so the guard lives
+ * here rather than in either of them.
  *
  * Deliberately not the obvious `import.meta.url === \`file://${process.argv[1]}\``:
  * `import.meta.url` is a real URL and percent-encodes what URLs must, while

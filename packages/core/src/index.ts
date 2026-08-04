@@ -62,6 +62,8 @@ export {
   type User,
 } from "./clients.js";
 
+export { isValidEmail, normalizeEmail } from "./emails.js";
+
 export {
   MIN_PASSWORD_LENGTH,
   WEAK_PASSWORD_MESSAGE,
@@ -76,3 +78,10 @@ export {
   type PublishBlock,
   type PublishBlockReason,
 } from "./eligibility.js";
+
+// The mechanism both deployables migrate one shared database through, and the
+// entrypoint guard both their CLIs use. Not domain, but shared *because* the
+// database is shared — two copies of either would drift apart against it.
+export { runMigrations, type Migration } from "./migrations.js";
+
+export { isMainModule } from "./cli.js";

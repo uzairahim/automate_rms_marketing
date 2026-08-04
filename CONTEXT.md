@@ -20,8 +20,10 @@ The platform operator (us) — a named person with their own credentials, holdin
 a single global role that provisions Clients and their Users and can suspend a
 Client's access (e.g. on non-payment or plan expiry). Belongs to no Client and is
 never a User: the two identities never meet, and a Superadmin cannot log into a
-Client surface. Operates from its own `admin.` subdomain — a surface separate
-from every Client subdomain but backed by the same shared database.
+Client surface (nor a User into the admin one). Operates from its own admin
+application — a separately deployed service with its own login, backed by the
+same shared database (ADR 0010). Created by CLI, never by a deploy-time secret,
+so the role has an owner and a password that can change without a redeploy.
 _Avoid_: Owner, Root, Admin
 
 **User**:

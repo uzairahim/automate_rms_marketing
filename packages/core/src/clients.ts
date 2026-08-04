@@ -1,5 +1,6 @@
 import type pg from "pg";
 import { hashPassword, isStrongPassword, WEAK_PASSWORD_MESSAGE } from "./passwords.js";
+import { isValidEmail, normalizeEmail } from "./emails.js";
 import { isValidSubdomain } from "./subdomain.js";
 import { ProvisionError } from "./errors.js";
 import { planFromRow, type Plan, type PlanColumns, type PlanPatch } from "./plan.js";
@@ -62,10 +63,6 @@ function isValidTimezone(timezone: string): boolean {
     return false;
   }
 }
-
-// Deliberately liberal: enough to reject obvious non-emails, not to relitigate
-// RFC 5322. Real deliverability is proven by the password-reset email later.
-const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 const PG_UNIQUE_VIOLATION = "23505";
 
@@ -140,9 +137,9 @@ export async function createUser(
   pool: pg.Pool,
   input: { clientId: string; email: string; password: string },
 ): Promise<User> {
-  const email = input.email.trim().toLowerCase();
+  const email = normalizeEmail(input.email);
 
-  if (!EMAIL_PATTERN.test(email)) {
+  if (!isValidEmail(email)) {
     throw new ProvisionError("invalid_email", `Not a valid email address: ${input.email}`);
   }
   if (!isStrongPassword(input.password)) {

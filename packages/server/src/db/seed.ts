@@ -3,11 +3,11 @@ import {
   createClient,
   createUser,
   findClientBySubdomain,
+  isMainModule,
   ProvisionError,
   setUserPassword,
   type PlanPatch,
 } from "@smma/core";
-import { isMainModule } from "../cli.js";
 
 /**
  * Seed a development login.

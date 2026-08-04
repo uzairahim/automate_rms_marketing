@@ -6,3 +6,4 @@ dist/
 coverage/
 .DS_Store
 packages/web/dist/
+packages/admin/dist-web/

@@ -23,12 +23,20 @@ project's three **test seams** are established as reusable harness:
 packages/
   core/     What a Client is: provisioning, Plan, Branding, passwords, eligibility
   server/   Fastify API + BullMQ worker + DB + core seams (Publisher, Clock)
-  web/      React + Vite SPA
+  web/      React + Vite SPA — the Client-facing app
+  admin/    The Superadmin service: its own Fastify API + its own React/Vite SPA
 docker-compose.yml   Postgres + Redis for local dev
 ```
 
 The API and worker share one package (`@smma/server`) with two entrypoints
 (`src/api.ts`, `src/worker.ts`) so they share domain code and the DB layer.
+
+`@smma/admin` is a **separate deployable** (ADR 0010), so the code that can
+suspend every Client is not running in the internet-facing process that
+terminates OAuth callbacks and receives Meta's webhooks. It talks to the same
+Postgres, applies its own migrations (named `admin_*`, sharing the one
+`schema_migrations` table), and requires nothing but `DATABASE_URL` — no Redis,
+no shared token, and deliberately not the token-encryption key.
 
 `@smma/core` holds the tenancy and credential modules that more than one
 deployable needs (ADR 0010) — it depends on nothing but `pg` and `bcryptjs`.
@@ -64,6 +72,34 @@ round-trips.
 
 Run migrations standalone with `npm run migrate`.
 
+### The admin panel
+
+The Superadmin panel runs under its own command, because it is its own
+deployable — `npm run dev` is unchanged and does not start it:
+
+```bash
+npm run create-superadmin      # prompts for a password; also the way back in
+npm run dev:admin              # admin API on :3002, admin SPA on :5174
+```
+
+Open <http://localhost:5174> and sign in with the account the CLI just made.
+
+`create-superadmin` never takes the password as an argument, so it does not land
+in your shell history. Re-running it for an email that already exists **resets
+that password** and ends that operator's live sessions, which is how a locked-out
+operator gets back in — there is no email reset flow and no bootstrap
+environment variable.
+
+The operator's session is an httpOnly, `Secure`, `SameSite=Strict` cookie, not a
+token the SPA holds: it can suspend every Client on the platform, so a single
+injection flaw in the panel must not be able to read it. That also means the
+panel must be served **same-origin with its own API** (the Vite dev server
+proxies `/api` to `:3002`). If your browser refuses the cookie over plain HTTP,
+set `ADMIN_INSECURE_COOKIE=true` — local development only.
+
+The development seeder is unaffected: `npm run seed` still produces a working
+Client and login without the panel.
+
 ### Connecting accounts without a Meta or TikTok app
 
 With `META_APP_ID`/`META_APP_SECRET` unset, the app wires the **fake
@@ -90,7 +126,7 @@ key forces every Client to reconnect every social account**.
 ## Test
 
 ```bash
-npm test        # server behavioral + unit suite (Vitest)
+npm test        # both services' behavioral + unit suites (Vitest)
 npm run typecheck
 ```
 

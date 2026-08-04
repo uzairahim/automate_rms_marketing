@@ -60,6 +60,38 @@ curl -s -X PATCH "http://localhost:3001/api/admin/clients/$CID/branding" "${ADMI
 Then log in at `http://acme.localhost:5173` — `*.localhost` resolves to 127.0.0.1
 with no `/etc/hosts` entry needed.
 
+## The admin panel (`@smma/admin`)
+
+A **separate deployable** (ADR 0010) with its own API, its own SPA, and its own
+migrations — not part of `npm run dev`, and it needs neither Redis nor any of the
+platform credentials. Verify a change to it on its own stack:
+
+```bash
+docker compose up -d          # Postgres only is enough for this one
+npm run create-superadmin     # prompts for the password (twice); email as an optional arg
+npm run dev:admin             # admin API :3002, admin SPA :5174 (proxies /api to :3002)
+```
+
+Sign in at <http://localhost:5174> with the account the CLI just made. There is
+no Host-header tenancy here: the admin service has no Client to resolve, so any
+host reaches it.
+
+- The session is an httpOnly cookie, so `document.cookie` in the console is
+  **expected to be empty** — that is the property, not a bug.
+- If sign-in appears to succeed but the shell never loads, the browser is
+  dropping the `Secure` cookie over plain HTTP. Set `ADMIN_INSECURE_COOKIE=true`
+  and restart the admin API.
+- Re-running `create-superadmin` for an existing email resets that password and
+  ends that operator's live sessions — the lockout-recovery path, and the way to
+  get back in after forgetting what you typed.
+- Hitting it with curl needs a cookie jar, since there is no bearer token:
+  ```bash
+  curl -s -c /tmp/admin.jar -X POST http://localhost:3002/api/auth/login \
+    -H 'content-type: application/json' \
+    -d '{"email":"you@example.com","password":"..."}'
+  curl -s -b /tmp/admin.jar http://localhost:3002/api/me
+  ```
+
 ## Driving the OAuth connect flows against the fake
 
 The fake Publisher's `authorizeUrl` points at `https://example.test/...`, so
