@@ -1,13 +1,20 @@
 import { useState } from "react";
 import { signOut, type Superadmin } from "./api.js";
+import { ClientList } from "./ClientList.js";
+import { ClientDetail } from "./ClientDetail.js";
+import { NewClient } from "./NewClient.js";
 
 /**
  * The authenticated shell: who is signed in, a way out, and the frame the
  * administrative screens hang inside.
  *
- * It is empty on purpose. This slice delivers the identity and the door; the
- * Client list and the per-Client screens fill this space in the slices after it.
+ * Where the operator is, is held in state rather than in the URL — as in the
+ * Client SPA, and for the same reason: there is no router here, and three
+ * destinations do not earn one. A reload lands back on the Client list, which is
+ * the right place to land anyway.
  */
+type View = { kind: "list" } | { kind: "new" } | { kind: "detail"; clientId: string };
+
 export function Shell({
   superadmin,
   onSignedOut,
@@ -16,6 +23,7 @@ export function Shell({
   onSignedOut: () => void;
 }) {
   const [signingOut, setSigningOut] = useState(false);
+  const [view, setView] = useState<View>({ kind: "list" });
 
   async function endSession() {
     setSigningOut(true);
@@ -31,7 +39,13 @@ export function Shell({
   return (
     <>
       <header className="topbar">
-        <span className="topbar-title">Platform administration</span>
+        <button
+          type="button"
+          className="topbar-title"
+          onClick={() => setView({ kind: "list" })}
+        >
+          Platform administration
+        </button>
         <div className="topbar-right">
           <span>{superadmin.email}</span>
           <button type="button" className="linkbutton" onClick={endSession} disabled={signingOut}>
@@ -41,11 +55,35 @@ export function Shell({
       </header>
 
       <main className="main">
-        <h2 className="section-title">Clients</h2>
-        <p className="placeholder">
-          Nothing here yet. The Client list, provisioning, Users, Plan and Branding
-          controls land in this shell next.
-        </p>
+        {/*
+         * `onSessionEnded` is `onSignedOut`: an admin session expires on its own
+         * and deliberately soon, so a screen being told 401 mid-session is the
+         * normal end of an operator's day. That belongs at the sign-in form, not
+         * in a red box inside a shell that can no longer load anything.
+         */}
+        {view.kind === "list" && (
+          <ClientList
+            onOpen={(clientId) => setView({ kind: "detail", clientId })}
+            onProvision={() => setView({ kind: "new" })}
+            onSessionEnded={onSignedOut}
+          />
+        )}
+
+        {view.kind === "new" && (
+          <NewClient
+            onCreated={(clientId) => setView({ kind: "detail", clientId })}
+            onCancel={() => setView({ kind: "list" })}
+            onSessionEnded={onSignedOut}
+          />
+        )}
+
+        {view.kind === "detail" && (
+          <ClientDetail
+            clientId={view.clientId}
+            onBack={() => setView({ kind: "list" })}
+            onSessionEnded={onSignedOut}
+          />
+        )}
       </main>
     </>
   );

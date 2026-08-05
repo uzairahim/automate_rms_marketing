@@ -3,6 +3,7 @@ import cookie from "@fastify/cookie";
 import type pg from "pg";
 import type { Clock } from "./clock.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerClientRoutes } from "./routes/clients.js";
 
 /**
  * The Superadmin API — a separate deployable from the Client-facing service
@@ -47,6 +48,7 @@ export function buildAdminApp(deps: AdminAppDeps): FastifyInstance {
   // here (as the Client API runs) would undo what `SameSite=Strict` is for.
 
   app.register(registerAuthRoutes);
+  app.register(registerClientRoutes);
 
   // A liveness probe that proves the one thing this service needs to be up:
   // that it can reach the database.

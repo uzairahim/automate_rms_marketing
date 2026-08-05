@@ -76,6 +76,17 @@ Sign in at <http://localhost:5174> with the account the CLI just made. There is
 no Host-header tenancy here: the admin service has no Client to resolve, so any
 host reaches it.
 
+**Provisioning a Client from the panel** is the other way to do step 1 above, and
+the one to use when the change is to the panel itself: **Add a Client**, give it a
+subdomain and a timezone, tick its platforms, and you land on that Client's screen.
+The Client is immediately reachable at `http://<subdomain>.localhost:5173` if the
+Client-facing stack is also up — which is the end-to-end check worth doing, since
+the two services only meet in the database.
+
+Its Users, Plan, and Branding are still curl-only (the panel's sections for them
+land in later slices), so a Client provisioned in the panel still needs step 2's
+call to get a login.
+
 - The session is an httpOnly cookie, so `document.cookie` in the console is
   **expected to be empty** — that is the property, not a bug.
 - If sign-in appears to succeed but the shell never loads, the browser is

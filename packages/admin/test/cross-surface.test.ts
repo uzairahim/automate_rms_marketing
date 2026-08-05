@@ -1,20 +1,11 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { createClient, createUser } from "@smma/core";
 import { buildTestAdminApp, loginAs, withSession } from "./helpers/app.js";
 import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
+import { buildTestClientApp, clientHost } from "./helpers/client-app.js";
 import { TestClock } from "../src/clock.js";
 import { upsertSuperadmin } from "../src/auth/superadmins.js";
-// Development-only use of the Client-facing service (PRD #15): the only way to
-// prove a Superadmin cannot log in on a Client subdomain is to try it on the
-// real Client-facing app. Nothing under `src/` imports it.
-import { buildApp } from "../../server/src/app.js";
-import { FakePublisher } from "../../server/src/core/fake-publisher.js";
-import { FakeEmailSender } from "../../server/src/core/fake-email.js";
-import { createSecretCipher } from "../../server/src/core/crypto.js";
 
 /**
  * The two identities never meet (CONTEXT.md `Superadmin`).
@@ -26,7 +17,6 @@ import { createSecretCipher } from "../../server/src/core/crypto.js";
  * admin panel would be a tenant who could suspend every other one.
  */
 
-const BASE_DOMAIN = "ourapp.test";
 const OPERATOR_EMAIL = "operator@ourapp.test";
 const OPERATOR_PASSWORD = "correct horse battery";
 const USER_EMAIL = "user@acme.test";
@@ -41,18 +31,7 @@ describe("Cross-surface isolation between a Superadmin and a Client's User", () 
   beforeAll(async () => {
     db = await startTestPostgres({ clientSchema: true });
     adminApp = buildTestAdminApp({ pool: db.pool, clock });
-    clientApp = buildApp({
-      pool: db.pool,
-      clock,
-      publisher: new FakePublisher(),
-      emailSender: new FakeEmailSender(),
-      tokenCipher: createSecretCipher(Buffer.alloc(32, 7)),
-      baseDomain: BASE_DOMAIN,
-      superadminToken: "unused-shared-token",
-      oauthRedirectBaseUrl: "https://connect.ourapp.test",
-      mediaDir: mkdtempSync(path.join(tmpdir(), "smma-admin-media-")),
-      mediaBaseUrl: "https://media.ourapp.test",
-    });
+    clientApp = buildTestClientApp({ pool: db.pool, clock });
     await Promise.all([adminApp.ready(), clientApp.ready()]);
   });
 
@@ -79,7 +58,7 @@ describe("Cross-surface isolation between a Superadmin and a Client's User", () 
     clientApp.inject({
       method: "POST",
       url: "/api/auth/login",
-      headers: { host: `acme.${BASE_DOMAIN}` },
+      headers: { host: clientHost("acme") },
       payload: { email, password },
     });
 
@@ -114,7 +93,7 @@ describe("Cross-surface isolation between a Superadmin and a Client's User", () 
     const res = await clientApp.inject({
       method: "GET",
       url: "/api/me",
-      headers: { host: `acme.${BASE_DOMAIN}`, authorization: `Bearer ${token}` },
+      headers: { host: clientHost("acme"), authorization: `Bearer ${token}` },
     });
 
     expect(res.statusCode).toBe(401);

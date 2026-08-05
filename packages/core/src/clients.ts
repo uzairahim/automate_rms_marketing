@@ -231,13 +231,24 @@ export async function setUserPassword(
  *
  * The by-id counterpart to {@link findClientBySubdomain}, for the paths that
  * cannot resolve a tenant from the host: an OAuth callback returning through the
- * shared redirect URI, and a platform webhook that has no host of ours at all.
+ * shared redirect URI, a platform webhook that has no host of ours at all, and
+ * the Superadmin naming a Client explicitly rather than by subdomain.
+ *
+ * A malformed uuid is null rather than an error, matching how the write paths
+ * treat one: an id that cannot name a Client names no Client, and every caller
+ * would otherwise have to catch a Postgres code to say so.
  */
 export async function findClientById(pool: pg.Pool, clientId: string): Promise<Client | null> {
-  const { rows } = await pool.query<ClientRow>(
-    `SELECT ${CLIENT_COLUMNS} FROM clients WHERE id = $1`,
-    [clientId],
-  );
+  let rows: ClientRow[];
+  try {
+    ({ rows } = await pool.query<ClientRow>(
+      `SELECT ${CLIENT_COLUMNS} FROM clients WHERE id = $1`,
+      [clientId],
+    ));
+  } catch (err) {
+    if ((err as { code?: string })?.code === "22P02") return null;
+    throw err;
+  }
   const row = rows[0];
   return row ? clientFromRow(row) : null;
 }
