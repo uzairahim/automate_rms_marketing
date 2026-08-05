@@ -22,7 +22,6 @@ import { createSecretCipher } from "../../src/core/crypto.js";
 export const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7);
 
 export const TEST_BASE_DOMAIN = "ourapp.test";
-export const TEST_SUPERADMIN_TOKEN = "test-superadmin-token";
 export const TEST_META_APP_SECRET = "test-meta-app-secret";
 export const TEST_OAUTH_REDIRECT_BASE_URL = "https://connect.ourapp.test";
 export const TEST_MEDIA_BASE_URL = "https://media.ourapp.test";
@@ -35,7 +34,6 @@ export function buildTestApp(overrides: Partial<AppDeps> & Pick<AppDeps, "pool">
     emailSender: new FakeEmailSender(),
     tokenCipher: createSecretCipher(TEST_ENCRYPTION_KEY),
     baseDomain: TEST_BASE_DOMAIN,
-    superadminToken: TEST_SUPERADMIN_TOKEN,
     oauthRedirectBaseUrl: TEST_OAUTH_REDIRECT_BASE_URL,
     metaAppSecret: TEST_META_APP_SECRET,
     // A fresh throwaway directory per app build — Media is real disk I/O in

@@ -15,19 +15,20 @@ import { updatePlan } from "@smma/core";
  *
  * Two gates are exercised: platform toggles (what a User sees and may act on)
  * and access status (whether a User can log in / act at all).
+ *
+ * Both are set here through `@smma/core` rather than over HTTP: setting them is
+ * the operator's act, and it happens in `@smma/admin` now (ADR 0010). What this
+ * service does about a Plan — which is all of the behavior below — is what the
+ * suite is for.
  */
 
 const BASE_DOMAIN = "ourapp.test";
-const SUPERADMIN_TOKEN = "test-superadmin-token";
-const ADMIN_HOST = `admin.${BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${BASE_DOMAIN}`;
 
 describe("Plan gating and access status", () => {
   let db: TestPostgres;
   let app: FastifyInstance;
   const clock = new TestClock(new Date("2026-07-14T09:00:00.000Z"));
-
-  const adminAuth = { authorization: `Bearer ${SUPERADMIN_TOKEN}` };
 
   beforeAll(async () => {
     db = await startTestPostgres();
@@ -37,7 +38,6 @@ describe("Plan gating and access status", () => {
       publisher: new FakePublisher(),
       emailSender: new FakeEmailSender(),
       baseDomain: BASE_DOMAIN,
-      superadminToken: SUPERADMIN_TOKEN,
     });
     await app.ready();
   });
@@ -70,128 +70,6 @@ describe("Plan gating and access status", () => {
     expect(res.statusCode).toBe(200);
     return res.json().token as string;
   }
-
-  async function setPlan(
-    clientId: string,
-    patch: Record<string, unknown>,
-  ): Promise<ReturnType<FastifyInstance["inject"]>> {
-    return app.inject({
-      method: "PATCH",
-      url: `/api/admin/clients/${clientId}/plan`,
-      headers: { host: ADMIN_HOST, ...adminAuth },
-      payload: patch,
-    });
-  }
-
-  describe("Superadmin sets platform toggles and access status", () => {
-    it("defaults a new Client to all platforms off and active", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { subdomain: "acme", timezone: "America/New_York" },
-      });
-      expect(res.statusCode).toBe(201);
-      expect(res.json().plan).toEqual({
-        facebook: false,
-        instagram: false,
-        tiktok: false,
-        accessStatus: "active",
-      });
-    });
-
-    it("provisions a Client with an explicit Plan", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: {
-          subdomain: "acme",
-          timezone: "America/New_York",
-          plan: { tiktok: true },
-        },
-      });
-      expect(res.statusCode).toBe(201);
-      expect(res.json().plan).toMatchObject({
-        facebook: false,
-        instagram: false,
-        tiktok: true,
-      });
-    });
-
-    it("toggles each platform on and off after creation", async () => {
-      const { clientId } = await provision("acme", "u@acme.test");
-
-      const on = await setPlan(clientId, { facebook: true, instagram: true });
-      expect(on.statusCode).toBe(200);
-      expect(on.json().plan).toMatchObject({ facebook: true, instagram: true, tiktok: false });
-
-      const off = await setPlan(clientId, { facebook: false });
-      expect(off.statusCode).toBe(200);
-      expect(off.json().plan).toMatchObject({ facebook: false, instagram: true });
-    });
-
-    it("sets access status to active, suspended, or expired", async () => {
-      const { clientId } = await provision("acme", "u@acme.test");
-      for (const accessStatus of ["suspended", "expired", "active"] as const) {
-        const res = await setPlan(clientId, { accessStatus });
-        expect(res.statusCode).toBe(200);
-        expect(res.json().plan.accessStatus).toBe(accessStatus);
-      }
-    });
-
-    it("rejects an unknown access status with 400", async () => {
-      const { clientId } = await provision("acme", "u@acme.test");
-      const res = await setPlan(clientId, { accessStatus: "cancelled" });
-      expect(res.statusCode).toBe(400);
-      expect(res.json().error).toBe("invalid_access_status");
-    });
-
-    it("404s a plan update for an unknown Client", async () => {
-      const res = await setPlan("00000000-0000-0000-0000-000000000000", { facebook: true });
-      expect(res.statusCode).toBe(404);
-    });
-
-    it("shows every Client's access status in the single global view", async () => {
-      const acme = await provision("acme", "a@acme.test");
-      await provision("globex", "b@globex.test");
-      await updatePlan(db.pool, acme.clientId, { accessStatus: "suspended" });
-
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-      });
-      expect(res.statusCode).toBe(200);
-      const byName = Object.fromEntries(
-        (res.json() as Array<{ subdomain: string; plan: { accessStatus: string } }>).map((c) => [
-          c.subdomain,
-          c.plan.accessStatus,
-        ]),
-      );
-      expect(byName).toEqual({ acme: "suspended", globex: "active" });
-    });
-
-    it("gates the plan route to the admin surface + token", async () => {
-      const { clientId } = await provision("acme", "u@acme.test");
-
-      const noToken = await app.inject({
-        method: "PATCH",
-        url: `/api/admin/clients/${clientId}/plan`,
-        headers: { host: ADMIN_HOST },
-        payload: { facebook: true },
-      });
-      expect(noToken.statusCode).toBe(401);
-
-      const fromClient = await app.inject({
-        method: "PATCH",
-        url: `/api/admin/clients/${clientId}/plan`,
-        headers: { host: host("acme"), ...adminAuth },
-        payload: { facebook: true },
-      });
-      expect(fromClient.statusCode).toBe(404);
-    });
-  });
 
   describe("Access status gates login", () => {
     it("blocks login for a suspended Client with a clear reason", async () => {

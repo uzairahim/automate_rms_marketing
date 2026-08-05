@@ -1,14 +1,15 @@
 /**
  * Subdomain routing — how a request's Host header becomes a surface.
  *
- * Two frontends sit over one API (ADR 0001, PRD "Surfaces"): every Client is
- * reached at its own subdomain and the Superadmin operates from the reserved
- * `admin.` subdomain. The Client is derived from the subdomain for Client
- * requests; the admin surface is deliberately *not* tenant-scoped (it operates
- * across Clients via an explicit selector, never by "which subdomain am I on").
+ * Every Client is reached at its own subdomain, and the Client is derived from
+ * that subdomain (ADR 0001, PRD "Surfaces"). The `admin.` label is reserved so
+ * no Client can claim it, but nothing is served there: the Superadmin's
+ * application is its own deployable on its own host, with no Host-header
+ * tenancy at all (ADR 0010). So `admin.` resolves to a surface of its own here
+ * only to keep it from ever being read as a Client.
  */
 
-/** The reserved label for the Superadmin surface; never a valid Client subdomain. */
+/** The reserved label, held back from Clients; never routed to anything. */
 export const ADMIN_SUBDOMAIN = "admin";
 
 export type Surface =

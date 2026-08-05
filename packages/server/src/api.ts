@@ -46,7 +46,6 @@ async function main(): Promise<void> {
     // Fails fast at startup on a bad key, rather than at the first connect.
     tokenCipher: createSecretCipher(parseEncryptionKey(config.tokenEncryptionKey)),
     baseDomain: config.baseDomain,
-    superadminToken: config.superadminToken,
     oauthRedirectBaseUrl: config.oauthRedirectBaseUrl,
     metaAppSecret: config.meta.appSecret,
     healthQueue,

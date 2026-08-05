@@ -8,17 +8,19 @@ import { startTestPostgres, type TestPostgres } from "./helpers/postgres.js";
 import { provisionClient, provisionUser } from "./helpers/provision.js";
 
 /**
- * Slice 4 behavioral suite — additional Users and the password-reset lifecycle,
- * driven through the real Fastify API against a real, throwaway Postgres. The
- * email provider is the one fake ({@link FakeEmailSender}): a test reads the
- * reset link out of the captured message and drives the flow with it, so the
- * whole issue → email → consume path is exercised without sending real mail.
- * Expiry is driven by the injected {@link TestClock}, never real waiting.
+ * Slice 4 behavioral suite — additional Users and the *self-service* password
+ * reset lifecycle, driven through the real Fastify API against a real, throwaway
+ * Postgres. The email provider is the one fake ({@link FakeEmailSender}): a test
+ * reads the reset link out of the captured message and drives the flow with it,
+ * so the whole issue → email → consume path is exercised without sending real
+ * mail. Expiry is driven by the injected {@link TestClock}, never real waiting.
+ *
+ * The operator's out-of-band reset is a different flow on a different service:
+ * `@smma/admin` owns it and asserts it there, including that it ends the User's
+ * live sessions and invalidates any link issued by the flow below.
  */
 
 const BASE_DOMAIN = "ourapp.test";
-const SUPERADMIN_TOKEN = "test-superadmin-token";
-const ADMIN_HOST = `admin.${BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${BASE_DOMAIN}`;
 
 const PASSWORD = "correct horse battery";
@@ -30,8 +32,6 @@ describe("Additional Users and password reset", () => {
   let email: FakeEmailSender;
   const clock = new TestClock(new Date("2026-07-14T09:00:00.000Z"));
 
-  const adminAuth = { authorization: `Bearer ${SUPERADMIN_TOKEN}` };
-
   beforeAll(async () => {
     db = await startTestPostgres();
     email = new FakeEmailSender();
@@ -41,7 +41,6 @@ describe("Additional Users and password reset", () => {
       publisher: new FakePublisher(),
       emailSender: email,
       baseDomain: BASE_DOMAIN,
-      superadminToken: SUPERADMIN_TOKEN,
     });
     await app.ready();
   });
@@ -109,17 +108,10 @@ describe("Additional Users and password reset", () => {
   }
 
   describe("Additional Users", () => {
-    it("lets the Superadmin add more than one User to a Client", async () => {
+    it("lets a Client have several Users, each able to log in", async () => {
       const clientId = await createClient("acme");
-      // The Superadmin's own act, so it is driven through the admin route.
       for (const userEmail of ["first@acme.test", "second@acme.test"]) {
-        const res = await app.inject({
-          method: "POST",
-          url: `/api/admin/clients/${clientId}/users`,
-          headers: { host: ADMIN_HOST, ...adminAuth },
-          payload: { email: userEmail, password: PASSWORD },
-        });
-        expect(res.statusCode).toBe(201);
+        await createUser(clientId, userEmail);
       }
 
       const { rows } = await db.pool.query<{ count: string }>(
@@ -127,22 +119,8 @@ describe("Additional Users and password reset", () => {
         [clientId],
       );
       expect(rows[0]!.count).toBe("2");
+      expect(await loginStatus("acme", "first@acme.test", PASSWORD)).toBe(200);
       expect(await loginStatus("acme", "second@acme.test", PASSWORD)).toBe(200);
-    });
-
-    it("still enforces global email uniqueness for an additional User", async () => {
-      const acme = await createClient("acme");
-      const globex = await createClient("globex");
-      await createUser(acme, "shared@example.test");
-
-      const res = await app.inject({
-        method: "POST",
-        url: `/api/admin/clients/${globex}/users`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { email: "Shared@example.test", password: "another password" },
-      });
-      expect(res.statusCode).toBe(409);
-      expect(res.json().error).toBe("email_taken");
     });
   });
 
@@ -291,84 +269,6 @@ describe("Additional Users and password reset", () => {
         payload: { email: "user@acme.test" },
       });
       expect(res.statusCode).toBe(404);
-    });
-  });
-
-  describe("Superadmin direct password set", () => {
-    it("sets a User's password so they can log in with it", async () => {
-      const clientId = await createClient("acme");
-      const userId = await createUser(clientId, "user@acme.test");
-
-      const res = await app.inject({
-        method: "POST",
-        url: `/api/admin/users/${userId}/password`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { password: NEW_PASSWORD },
-      });
-      expect(res.statusCode).toBe(200);
-
-      expect(await loginStatus("acme", "user@acme.test", NEW_PASSWORD)).toBe(200);
-      expect(await loginStatus("acme", "user@acme.test", PASSWORD)).toBe(401);
-    });
-
-    it("revokes the User's live sessions when their password is set", async () => {
-      const clientId = await createClient("acme");
-      const userId = await createUser(clientId, "user@acme.test");
-
-      const login = await app.inject({
-        method: "POST",
-        url: "/api/auth/login",
-        headers: { host: host("acme") },
-        payload: { email: "user@acme.test", password: PASSWORD },
-      });
-      const token = login.json().token as string;
-
-      await app.inject({
-        method: "POST",
-        url: `/api/admin/users/${userId}/password`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { password: NEW_PASSWORD },
-      });
-
-      const me = await app.inject({
-        method: "GET",
-        url: "/api/me",
-        headers: { host: host("acme"), authorization: `Bearer ${token}` },
-      });
-      expect(me.statusCode).toBe(401);
-    });
-
-    it("404s when setting the password of an unknown User", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/admin/users/00000000-0000-0000-0000-000000000000/password",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { password: NEW_PASSWORD },
-      });
-      expect(res.statusCode).toBe(404);
-      expect(res.json().error).toBe("user_not_found");
-    });
-
-    it("rejects a weak password and requires the Superadmin token", async () => {
-      const clientId = await createClient("acme");
-      const userId = await createUser(clientId, "user@acme.test");
-
-      const weak = await app.inject({
-        method: "POST",
-        url: `/api/admin/users/${userId}/password`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { password: "short" },
-      });
-      expect(weak.statusCode).toBe(400);
-      expect(weak.json().error).toBe("weak_password");
-
-      const noToken = await app.inject({
-        method: "POST",
-        url: `/api/admin/users/${userId}/password`,
-        headers: { host: ADMIN_HOST },
-        payload: { password: NEW_PASSWORD },
-      });
-      expect(noToken.statusCode).toBe(401);
     });
   });
 });

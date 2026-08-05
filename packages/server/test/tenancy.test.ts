@@ -11,19 +11,24 @@ import { provisionClientWithUser, TEST_PASSWORD } from "./helpers/provision.js";
  * Slice 2 behavioral suite — the tenancy spine driven through the real Fastify
  * API against a real, throwaway Postgres (the PRD's primary seam). Every
  * assertion is on observable behavior: HTTP responses and resulting DB state.
+ *
+ * Provisioning is *setup* here, not the behavior under test: it happens through
+ * `@smma/core` directly, because this service has no route that provisions
+ * anything (ADR 0010). The panel's own surface is covered in `@smma/admin`.
  */
 
 const BASE_DOMAIN = "ourapp.test";
-const SUPERADMIN_TOKEN = "test-superadmin-token";
 const ADMIN_HOST = `admin.${BASE_DOMAIN}`;
 const host = (subdomain: string) => `${subdomain}.${BASE_DOMAIN}`;
 
-describe("Tenancy spine: provisioning, subdomain tenancy, login", () => {
+describe("Tenancy spine: subdomain tenancy and login", () => {
   let db: TestPostgres;
   let app: FastifyInstance;
   const clock = new TestClock(new Date("2026-07-14T09:00:00.000Z"));
 
-  const adminAuth = { authorization: `Bearer ${SUPERADMIN_TOKEN}` };
+  // Any bearer at all, so the suite below can present one and show it opens
+  // nothing. There is no longer a value that would open anything.
+  const adminAuth = { authorization: "Bearer any-token-at-all" };
 
   beforeAll(async () => {
     db = await startTestPostgres();
@@ -33,7 +38,6 @@ describe("Tenancy spine: provisioning, subdomain tenancy, login", () => {
       publisher: new FakePublisher(),
       emailSender: new FakeEmailSender(),
       baseDomain: BASE_DOMAIN,
-      superadminToken: SUPERADMIN_TOKEN,
     });
     await app.ready();
   });
@@ -57,143 +61,81 @@ describe("Tenancy spine: provisioning, subdomain tenancy, login", () => {
     return provisionClientWithUser(db.pool, { subdomain, email, password });
   }
 
-  describe("Superadmin provisioning (admin. surface)", () => {
-    it("creates a Client with a unique subdomain and timezone", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { subdomain: "acme", timezone: "America/New_York" },
-      });
-      expect(res.statusCode).toBe(201);
-      expect(res.json()).toMatchObject({ subdomain: "acme", timezone: "America/New_York" });
+  describe("The retired Superadmin API", () => {
+    /**
+     * Provisioning lives in `@smma/admin` now, in a process of its own (ADR
+     * 0010). What is asserted here is the absence: this service no longer
+     * answers on any administrative path, whatever host the caller claims.
+     *
+     * The `admin.` host is the case that matters. It was never a boundary — it
+     * is read off a Host header the caller writes — so a request claiming it is
+     * exactly what this suite must show reaches nothing.
+     */
+    /** Every path the administrative API used to answer on, aimed at a given id. */
+    const retiredRoutes = (id: string): Array<["GET" | "POST" | "PATCH", string]> => [
+      ["POST", "/api/admin/clients"],
+      ["GET", "/api/admin/clients"],
+      ["POST", `/api/admin/clients/${id}/users`],
+      ["PATCH", `/api/admin/clients/${id}/plan`],
+      ["PATCH", `/api/admin/clients/${id}/branding`],
+      ["POST", `/api/admin/users/${id}/password`],
+    ];
 
-      const { rows } = await db.pool.query("SELECT subdomain, timezone FROM clients");
-      expect(rows).toEqual([{ subdomain: "acme", timezone: "America/New_York" }]);
-    });
+    const CALLER_HOSTS: Array<[string, string]> = [
+      ["a spoofed admin. host", ADMIN_HOST],
+      ["a Client's subdomain", host("acme")],
+      ["a host belonging to no surface at all", "elsewhere.test"],
+    ];
 
-    it("rejects a duplicate subdomain with 409", async () => {
-      await provision("acme", "a@acme.test");
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { subdomain: "acme", timezone: "America/New_York" },
-      });
-      expect(res.statusCode).toBe(409);
-      expect(res.json().error).toBe("subdomain_taken");
-    });
+    /** Everything a former administrative call might have carried, in one body. */
+    const KITCHEN_SINK = {
+      subdomain: "sneaky",
+      timezone: "UTC",
+      email: "sneak@acme.test",
+      password: "a password here",
+      accessStatus: "suspended",
+      appName: "Sneaky",
+    };
 
-    it("rejects an invalid subdomain, the reserved admin label, and a bad timezone", async () => {
-      const cases: Array<[Record<string, string>, string]> = [
-        [{ subdomain: "Not Valid", timezone: "America/New_York" }, "invalid_subdomain"],
-        [{ subdomain: "admin", timezone: "America/New_York" }, "invalid_subdomain"],
-        [{ subdomain: "acme", timezone: "Mars/Olympus" }, "invalid_timezone"],
-      ];
-      for (const [payload, error] of cases) {
-        const res = await app.inject({
-          method: "POST",
-          url: "/api/admin/clients",
-          headers: { host: ADMIN_HOST, ...adminAuth },
-          payload,
-        });
-        expect(res.statusCode).toBe(400);
-        expect(res.json().error).toBe(error);
+    it.each(CALLER_HOSTS)("answers 404 on every former path from %s", async (_label, callerHost) => {
+      const { clientId } = await provision("acme", "u@acme.test");
+
+      for (const [method, url] of retiredRoutes(clientId)) {
+        // With a bearer token and without one: neither is a key to anything,
+        // because there is no lock left behind them.
+        for (const headers of [{ host: callerHost }, { host: callerHost, ...adminAuth }]) {
+          const res = await app.inject({
+            method,
+            url,
+            headers,
+            ...(method === "GET" ? {} : { payload: KITCHEN_SINK }),
+          });
+          expect(res.statusCode, `${method} ${url} from ${callerHost}`).toBe(404);
+        }
       }
     });
 
-    it("lists all Clients in one place (single global view)", async () => {
-      await provision("acme", "a@acme.test");
-      await provision("globex", "b@globex.test");
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-      });
-      expect(res.statusCode).toBe(200);
-      const subdomains = (res.json() as Array<{ subdomain: string }>).map((c) => c.subdomain);
-      expect(subdomains.sort()).toEqual(["acme", "globex"]);
-    });
+    it("provisions nothing, however hard the former paths are pushed", async () => {
+      const { clientId } = await provision("acme", "u@acme.test");
 
-    it("creates a Client's first User and stores the password only as a hash", async () => {
-      const clientRes = await app.inject({
-        method: "POST",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { subdomain: "acme", timezone: "America/New_York" },
-      });
-      const clientId = clientRes.json().id as string;
+      for (const [_label, callerHost] of CALLER_HOSTS) {
+        for (const [method, url] of retiredRoutes(clientId)) {
+          await app.inject({
+            method,
+            url,
+            headers: { host: callerHost, ...adminAuth },
+            ...(method === "GET" ? {} : { payload: KITCHEN_SINK }),
+          });
+        }
+      }
 
-      const res = await app.inject({
-        method: "POST",
-        url: `/api/admin/clients/${clientId}/users`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { email: "User@Acme.test", password: "correct horse battery" },
-      });
-      expect(res.statusCode).toBe(201);
-      expect(res.json()).toMatchObject({ email: "user@acme.test", clientId });
-
-      const { rows } = await db.pool.query<{ password_hash: string }>(
-        "SELECT password_hash FROM users WHERE lower(email) = 'user@acme.test'",
+      // Nothing was created, and the Client is exactly as it was provisioned.
+      const { rows } = await db.pool.query<{ subdomain: string; access_status: string }>(
+        "SELECT subdomain, access_status FROM clients",
       );
-      expect(rows[0]!.password_hash).not.toContain("correct horse battery");
-      expect(rows[0]!.password_hash).toMatch(/^\$2[aby]\$/); // bcrypt
-    });
-
-    it("rejects an email that already exists anywhere on the platform", async () => {
-      await provision("acme", "shared@example.test");
-      // A different Client cannot reuse the same email.
-      const globex = await app.inject({
-        method: "POST",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { subdomain: "globex", timezone: "America/New_York" },
-      });
-      const res = await app.inject({
-        method: "POST",
-        url: `/api/admin/clients/${globex.json().id}/users`,
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { email: "Shared@example.test", password: "another password" },
-      });
-      expect(res.statusCode).toBe(409);
-      expect(res.json().error).toBe("email_taken");
-    });
-
-    it("404s when creating a User under an unknown Client", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/admin/clients/00000000-0000-0000-0000-000000000000/users",
-        headers: { host: ADMIN_HOST, ...adminAuth },
-        payload: { email: "x@y.test", password: "a password here" },
-      });
-      expect(res.statusCode).toBe(404);
-    });
-  });
-
-  describe("Admin surface access control", () => {
-    it("401s without the Superadmin token, and 401s with a wrong one", async () => {
-      const noToken = await app.inject({
-        method: "GET",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST },
-      });
-      expect(noToken.statusCode).toBe(401);
-
-      const wrong = await app.inject({
-        method: "GET",
-        url: "/api/admin/clients",
-        headers: { host: ADMIN_HOST, authorization: "Bearer nope" },
-      });
-      expect(wrong.statusCode).toBe(401);
-    });
-
-    it("404s admin routes reached from a Client subdomain, even with the token", async () => {
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/admin/clients",
-        headers: { host: host("acme"), ...adminAuth },
-      });
-      expect(res.statusCode).toBe(404);
+      expect(rows).toEqual([{ subdomain: "acme", access_status: "active" }]);
+      const users = await db.pool.query<{ email: string }>("SELECT email FROM users");
+      expect(users.rows.map((u) => u.email)).toEqual(["u@acme.test"]);
     });
   });
 

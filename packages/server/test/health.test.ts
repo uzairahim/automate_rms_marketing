@@ -19,7 +19,6 @@ describe("GET /api/health (API + Postgres seam)", () => {
       publisher: new FakePublisher(),
       emailSender: new FakeEmailSender(),
       baseDomain: "localhost",
-      superadminToken: "test-superadmin-token",
     });
     await app.ready();
   });

@@ -36,7 +36,13 @@ suspend every Client is not running in the internet-facing process that
 terminates OAuth callbacks and receives Meta's webhooks. It talks to the same
 Postgres, applies its own migrations (named `admin_*`, sharing the one
 `schema_migrations` table), and requires nothing but `DATABASE_URL` — no Redis,
-no shared token, and deliberately not the token-encryption key.
+and deliberately not the token-encryption key.
+
+`@smma/server` has **no administrative routes at all**, and there is no shared
+operator secret anywhere in the platform. Nothing reachable on a Client's
+subdomain can provision a Client, issue a credential, or change anyone's access
+— not because a guard refuses it, but because that code is a different process.
+The `admin.` label stays reserved so no Client can claim it, and serves nothing.
 
 `@smma/core` holds the tenancy and credential modules that more than one
 deployable needs (ADR 0010) — it depends on nothing but `pg` and `bcryptjs`.

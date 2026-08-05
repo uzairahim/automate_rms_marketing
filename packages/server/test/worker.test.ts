@@ -44,7 +44,6 @@ describe("Health job round-trip (BullMQ worker end-to-end)", () => {
       publisher: new FakePublisher(),
       emailSender: new FakeEmailSender(),
       baseDomain: "localhost",
-      superadminToken: "test-superadmin-token",
       healthQueue: queue,
     });
     await app.ready();

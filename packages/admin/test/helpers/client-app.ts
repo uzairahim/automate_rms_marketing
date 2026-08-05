@@ -51,7 +51,6 @@ export function buildTestClientApp(deps: {
     emailSender: deps.emailSender ?? new FakeEmailSender(),
     tokenCipher: createSecretCipher(Buffer.alloc(32, 7)),
     baseDomain: BASE_DOMAIN,
-    superadminToken: "unused-shared-token",
     oauthRedirectBaseUrl: "https://connect.ourapp.test",
     mediaDir: mkdtempSync(path.join(tmpdir(), "smma-admin-media-")),
     mediaBaseUrl: "https://media.ourapp.test",

@@ -32,39 +32,51 @@ you will see, and want, this:
 
 ## Provision a Client to log in as
 
-There is no signup — the Superadmin provisions everything, on the `admin.` host.
-Branding is a **separate PATCH**; passing `appName` to the create call is silently
-ignored.
+There is no signup, and **no administrative route exists on this API** — the
+Client-facing service cannot create a Client, issue a credential, or change
+anyone's access (ADR 0010). `admin.localhost` resolves to no Client, so every
+tenant-scoped route 404s there; the handful of un-tenanted ones (`/api/health`,
+the OAuth and webhook callbacks) answer on any host, as they always did. Two
+ways in, and which one you want depends on what you are verifying:
 
-Paste this whole block — it captures the Client id into `$CID` for the calls that
-need it:
+**The fast path — `npm run seed`.** One command, no second stack, and the way to
+get a login when the change under test has nothing to do with provisioning:
 
 ```bash
-ADMIN=(-H "host: admin.localhost" -H "authorization: Bearer dev-superadmin-token-change-me"
-       -H "content-type: application/json")
-
-# 1. Client — all three platforms enabled
-CID=$(curl -s -X POST http://localhost:3001/api/admin/clients "${ADMIN[@]}" \
-  -d '{"subdomain":"acme","timezone":"America/New_York","plan":{"facebook":true,"instagram":true,"tiktok":true}}' \
-  | python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
-
-# 2. User
-curl -s -X POST "http://localhost:3001/api/admin/clients/$CID/users" "${ADMIN[@]}" \
-  -d '{"email":"user@acme.test","password":"correct horse battery"}'
-
-# 3. Branding — separate from step 1, which silently ignores an appName
-curl -s -X PATCH "http://localhost:3001/api/admin/clients/$CID/branding" "${ADMIN[@]}" \
-  -d '{"appName":"Acme Social","primaryColor":"#0F766E"}'
+npm run seed        # idempotent; migrates first, so it works on a fresh checkout
 ```
 
-Then log in at `http://acme.localhost:5173` — `*.localhost` resolves to 127.0.0.1
-with no `/etc/hosts` entry needed.
+It prints the login it just planted, and re-running it resets that password — so
+it is also the way back in after losing one:
+
+```
+Sign in at http://acme.localhost:5173
+  email:    admin@test.com
+  password: Abcd_1234
+```
+
+That Client is `acme`, anchored to `America/New_York`, with all three platforms
+enabled and **default branding** — the seeder sets none, so a check that needs
+branding needs the panel. `SEED_SUBDOMAIN`, `SEED_TIMEZONE`, `SEED_EMAIL`, and
+`SEED_PASSWORD` change what it plants; the Plan is always all three platforms.
+
+`*.localhost` resolves to 127.0.0.1, so no `/etc/hosts` entry is needed.
+
+**The real path — the admin panel.** Provision through the operator's own
+service, which is what actually happens in production and the only way to reach
+branding, a Plan change, or a timezone change at all. It is a second stack under
+its own command; see the next section, then come back through
+[Provisioning a Client from the panel](#the-admin-panel-smmaadmin).
+
+Use the panel whenever the change touches provisioning, Plans, access status,
+branding, or timezones. Use the seeder for everything else.
 
 ## The admin panel (`@smma/admin`)
 
 A **separate deployable** (ADR 0010) with its own API, its own SPA, and its own
-migrations — not part of `npm run dev`, and it needs neither Redis nor any of the
-platform credentials. Verify a change to it on its own stack:
+migrations. It is **not part of `npm run dev`** — it boots under its own command,
+as a step of its own, and it needs neither Redis nor any of the platform
+credentials:
 
 ```bash
 docker compose up -d          # Postgres only is enough for this one
@@ -76,16 +88,16 @@ Sign in at <http://localhost:5174> with the account the CLI just made. There is
 no Host-header tenancy here: the admin service has no Client to resolve, so any
 host reaches it.
 
-**Provisioning a Client from the panel** is the other way to do step 1 above, and
-the one to use when the change is to the panel itself: **Add a Client**, give it a
-subdomain and a timezone, tick its platforms, and you land on that Client's screen.
-The Client is immediately reachable at `http://<subdomain>.localhost:5173` if the
-Client-facing stack is also up — which is the end-to-end check worth doing, since
-the two services only meet in the database.
+**Provisioning a Client from the panel** is the real path the seeder shortcuts,
+and the one to use when the change is to the panel itself: **Add a Client**, give
+it a subdomain and a timezone, tick its platforms, and you land on that Client's
+screen. The Client is immediately reachable at `http://<subdomain>.localhost:5173`
+if the Client-facing stack is also up — run both side by side, because that is
+the end-to-end check worth doing: the two services meet only in the database.
 
-**Giving it a login** is the Users section on that same screen, and it replaces
-step 2's curl entirely: type an email, press **Create User**, and the password is
-generated and shown once. Copy it there and then — dismissing the panel is the
+**Giving it a login** is the Users section on that same screen: type an email,
+press **Create User**, and the password is generated and shown once. Copy it
+there and then — dismissing the panel is the
 only chance you get, and nothing can show it again. **Reset password** on a row
 issues a fresh one the same way, and ends that User's live sessions, so a browser
 already signed in at `http://<subdomain>.localhost:5173` drops to the sign-in form
@@ -116,7 +128,8 @@ for, and it needs both stacks plus the worker:
 An **expired** Client behaves identically at every one of those steps; that they
 are indistinguishable is the point, not an oversight.
 
-**Its Branding** is the section below Users, and it replaces step 3's curl. Set a
+**Its Branding** is the section below Users, and it is the only way to set
+branding at all — the seeder leaves a Client on the neutral default. Set a
 name and a color, press **Save Branding**, then reload
 `http://<subdomain>.localhost:5173` **signed out** — the sign-in screen itself
 carries them, which is the property worth seeing rather than the header after

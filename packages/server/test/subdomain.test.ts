@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { resolveSurface, isValidSubdomain } from "@smma/core";
 
 // Pure, DB-free unit tests for the subdomain routing rules. The behavioral
-// consequences (admin gating, tenant scoping) are covered in tenancy.test.ts.
+// consequences — tenant scoping, and that the reserved `admin.` label now
+// reaches nothing at all — are covered in tenancy.test.ts.
 describe("resolveSurface", () => {
   const base = "ourapp.com";
 

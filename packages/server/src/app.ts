@@ -8,7 +8,6 @@ import type { Publisher } from "./core/publisher.js";
 import type { EmailSender } from "./core/email.js";
 import type { SecretCipher } from "./core/crypto.js";
 import { type HealthJobData } from "./queue/health-queue.js";
-import { registerSuperadminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerPlatformRoutes } from "./routes/platforms.js";
 import { registerBrandingRoutes } from "./routes/branding.js";
@@ -38,8 +37,6 @@ export interface AppDeps {
   tokenCipher: SecretCipher;
   /** Base domain for subdomain routing (e.g. `ourapp.com`, or `localhost` in dev). */
   baseDomain: string;
-  /** Shared secret gating the Superadmin `admin.` surface. */
-  superadminToken: string;
   /**
    * Origin of the canonical OAuth callback surface (e.g.
    * `https://connect.ourapp.com`). One fixed redirect URI per platform is
@@ -94,9 +91,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     done(null, body);
   });
 
-  // The tenancy spine (Slice 2): Superadmin provisioning on the `admin.` surface
-  // and Client-scoped User login on each Client subdomain.
-  app.register(registerSuperadminRoutes);
+  // The tenancy spine (Slice 2): Client-scoped User login on each Client
+  // subdomain. Provisioning is deliberately absent — it lives in `@smma/admin`,
+  // in a process of its own (ADR 0010), so nothing reachable here can create a
+  // Client, issue a credential, or suspend anyone.
   app.register(registerAuthRoutes);
   // Plan-gated platform surface (Slice 3): what a Client's Plan lets it see/act on.
   app.register(registerPlatformRoutes);

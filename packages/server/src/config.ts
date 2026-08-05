@@ -12,17 +12,13 @@ export interface Config {
   redisUrl: string;
   apiPort: number;
   /**
-   * The base domain the app is served under (e.g. `ourapp.com`). Client
-   * subdomains and the reserved `admin.` surface are resolved by stripping this
-   * suffix off the request Host header. In local dev it is `localhost`.
+   * The base domain the app is served under (e.g. `ourapp.com`). A Client is
+   * resolved by stripping this suffix off the request Host header. In local dev
+   * it is `localhost`. The `admin.` label stays reserved so no Client can claim
+   * it, but this service serves nothing there — the operator's panel is its own
+   * deployable on its own host (ADR 0010).
    */
   baseDomain: string;
-  /**
-   * Shared secret that gates the Superadmin `admin.` API surface. Sent as a
-   * bearer token on admin requests. Slice 2 uses a single provisioned secret;
-   * a full Superadmin login can layer on later without changing the routes.
-   */
-  superadminToken: string;
   /**
    * Transactional email (Slice 4). `from` is the sender address on every
    * outbound message. `resendApiKey` is the provider key read from the
@@ -95,7 +91,6 @@ export function loadConfig(): Config {
     redisUrl: required("REDIS_URL"),
     apiPort,
     baseDomain: process.env.BASE_DOMAIN ?? "localhost",
-    superadminToken: required("SUPERADMIN_TOKEN"),
     email: {
       from: process.env.EMAIL_FROM ?? "no-reply@localhost",
       resendApiKey: process.env.RESEND_API_KEY,
