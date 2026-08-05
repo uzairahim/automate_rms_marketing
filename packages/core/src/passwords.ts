@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import bcrypt from "bcryptjs";
 
 /**
@@ -23,6 +24,48 @@ export const WEAK_PASSWORD_MESSAGE = `Password must be at least ${MIN_PASSWORD_L
 /** Whether a plaintext password meets the minimum strength rule. */
 export function isStrongPassword(plaintext: string): boolean {
   return plaintext.length >= MIN_PASSWORD_LENGTH;
+}
+
+/**
+ * The alphabet a generated password is drawn from: the printable ASCII letters
+ * and digits, minus the glyphs that read as each other — `l`/`I`/`1`, `O`/`0`.
+ *
+ * These passwords are conveyed out of band and sometimes re-typed by hand, so a
+ * character that can be transcribed wrong is a support ticket. Dropping eight of
+ * them costs a fraction of a bit per character and is bought back by the length
+ * below many times over.
+ */
+const GENERATED_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+/** Characters per hyphen-separated group, and how many groups. */
+const GENERATED_GROUP_SIZE = 5;
+const GENERATED_GROUPS = 4;
+
+/**
+ * Generate a password nobody chose — the Superadmin panel's answer to a Client
+ * being provisioned with a weak or reused one (PRD #15). The panel has nowhere
+ * to type one, so no Client is handed a credential an operator invented.
+ *
+ * Twenty characters over a 56-character alphabet is ~116 bits, far past
+ * anything the {@link isStrongPassword} minimum governs — that rule goes on
+ * governing the paths where a human does choose their own (the Superadmin CLI
+ * and a User's self-service reset), and a generated password satisfies it by
+ * construction. Hyphenated into groups purely so it can be read aloud or
+ * re-typed without losing your place.
+ *
+ * `randomInt` rather than `Math.random`: this is a credential, and it is drawn
+ * without the modulo bias a naive `% alphabet.length` would introduce.
+ */
+export function generatePassword(): string {
+  const groups: string[] = [];
+  for (let group = 0; group < GENERATED_GROUPS; group++) {
+    let chars = "";
+    for (let i = 0; i < GENERATED_GROUP_SIZE; i++) {
+      chars += GENERATED_ALPHABET[randomInt(GENERATED_ALPHABET.length)];
+    }
+    groups.push(chars);
+  }
+  return groups.join("-");
 }
 
 /**

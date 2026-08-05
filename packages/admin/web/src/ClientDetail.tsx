@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { getClient, isSessionEnded, type Client } from "./api.js";
 import { AccessStatusBadge, PlanSummary } from "./client-bits.js";
+import { Users } from "./Users.js";
 
 /**
  * One Client — where the operator manages it, and where provisioning lands them.
  *
- * It reads rather than edits for now: the Users, Plan, and Branding sections
- * land in the slices after this one. What it shows is what an operator needs to
- * confirm they are looking at the right Client before doing anything to it.
+ * It opens with what an operator needs to confirm they are looking at the right
+ * Client before doing anything to it, and then the sections that act on it. Only
+ * Users so far; the Plan and Branding sections land in the slices after this.
  */
 export function ClientDetail({
   clientId,
@@ -80,8 +81,14 @@ export function ClientDetail({
             </dl>
           </div>
 
+          <Users
+            clientId={client.id}
+            subdomain={client.subdomain}
+            onSessionEnded={onSessionEnded}
+          />
+
           <p className="placeholder">
-            This Client's Users, Plan, and Branding are administered here — those sections
+            This Client's Plan and Branding are administered here too — those sections
             land next.
           </p>
         </>

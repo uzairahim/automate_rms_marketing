@@ -125,3 +125,51 @@ export const createClient = (input: {
   apiFetch<{ client: Client }>("/api/clients", { method: "POST", body: input }).then(
     (b) => b.client,
   );
+
+/* -------------------------------------------------------------------- Users */
+
+export interface User {
+  id: string;
+  clientId: string;
+  email: string;
+  createdAt: string;
+}
+
+/**
+ * A generated password and the User it belongs to, as returned by the one
+ * response that will ever carry it.
+ *
+ * The plaintext is deliberately not folded into {@link User}: it is not a
+ * property of a User, it is a thing that happened once. Keeping it in a separate
+ * shape is what stops it from being held in the list state alongside everyone
+ * else and re-rendered long after the operator has moved on.
+ *
+ * The User here is narrower than a listed one: creating and resetting answer
+ * with identity alone, and claiming a `createdAt` these responses do not send
+ * would be a type that lies about the wire.
+ */
+export interface IssuedCredential {
+  user: Pick<User, "id" | "clientId" | "email">;
+  password: string;
+}
+
+/** Who can log in to this Client, oldest first. */
+export const listUsers = (clientId: string) =>
+  apiFetch<{ users: User[] }>(`/api/clients/${clientId}/users`).then((b) => b.users);
+
+/**
+ * Create a User. The password is not a parameter — the panel does not have one
+ * to send, the API generates it, and what comes back is the only time it exists
+ * outside a bcrypt hash.
+ */
+export const createUser = (clientId: string, email: string) =>
+  apiFetch<IssuedCredential>(`/api/clients/${clientId}/users`, {
+    method: "POST",
+    body: { email },
+  });
+
+/** Reset a User's password, ending their live sessions and pending reset links. */
+export const resetUserPassword = (clientId: string, userId: string) =>
+  apiFetch<IssuedCredential>(`/api/clients/${clientId}/users/${userId}/password`, {
+    method: "POST",
+  });

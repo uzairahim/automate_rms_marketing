@@ -27,13 +27,21 @@ export function clientHost(subdomain: string): string {
  * check what the panel's writes look like from the surface a Client actually
  * uses. Its platform-touching dependencies are fakes, because nothing here
  * should ever reach a platform API.
+ *
+ * A suite may pass its own {@link FakeEmailSender} when it needs to read what
+ * the Client-facing service sent — the self-service reset link is the only such
+ * message, and the panel's reset has to invalidate one.
  */
-export function buildTestClientApp(deps: { pool: pg.Pool; clock: Clock }): FastifyInstance {
+export function buildTestClientApp(deps: {
+  pool: pg.Pool;
+  clock: Clock;
+  emailSender?: FakeEmailSender;
+}): FastifyInstance {
   return buildApp({
     pool: deps.pool,
     clock: deps.clock,
     publisher: new FakePublisher(),
-    emailSender: new FakeEmailSender(),
+    emailSender: deps.emailSender ?? new FakeEmailSender(),
     tokenCipher: createSecretCipher(Buffer.alloc(32, 7)),
     baseDomain: BASE_DOMAIN,
     superadminToken: "unused-shared-token",

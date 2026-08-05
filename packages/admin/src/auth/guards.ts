@@ -1,4 +1,4 @@
-import type { FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { resolveAdminSession, type Superadmin } from "./superadmins.js";
 import { sessionToken } from "./session-cookie.js";
 
@@ -28,4 +28,21 @@ export async function authenticateAdminRequest(
   }
 
   return superadmin;
+}
+
+/**
+ * Put every route in a plugin behind {@link authenticateAdminRequest}, asked
+ * once.
+ *
+ * Fastify encapsulates a plugin's hooks, so this covers exactly the routes
+ * registered in that plugin — and, unlike a check inside each handler, it covers
+ * the ones a later slice adds without anyone having to remember. One line per
+ * administrative route file is the whole of what has to be remembered.
+ */
+export function requireAdminSession(app: FastifyInstance): void {
+  app.addHook("preHandler", async (request, reply) => {
+    // Returning the reply is how an async hook halts the lifecycle; the 401 has
+    // already been sent by then.
+    if (!(await authenticateAdminRequest(request, reply))) return reply;
+  });
 }

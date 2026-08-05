@@ -83,9 +83,17 @@ The Client is immediately reachable at `http://<subdomain>.localhost:5173` if th
 Client-facing stack is also up — which is the end-to-end check worth doing, since
 the two services only meet in the database.
 
-Its Users, Plan, and Branding are still curl-only (the panel's sections for them
-land in later slices), so a Client provisioned in the panel still needs step 2's
-call to get a login.
+**Giving it a login** is the Users section on that same screen, and it replaces
+step 2's curl entirely: type an email, press **Create User**, and the password is
+generated and shown once. Copy it there and then — dismissing the panel is the
+only chance you get, and nothing can show it again. **Reset password** on a row
+issues a fresh one the same way, and ends that User's live sessions, so a browser
+already signed in at `http://<subdomain>.localhost:5173` drops to the sign-in form
+on its next request. Signing into the Client SPA with a password the panel just
+generated is the end-to-end check worth doing here.
+
+Its Plan and Branding are still curl-only — the panel's sections for them land in
+later slices.
 
 - The session is an httpOnly cookie, so `document.cookie` in the console is
   **expected to be empty** — that is the property, not a bug.

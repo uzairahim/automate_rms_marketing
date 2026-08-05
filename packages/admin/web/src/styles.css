@@ -433,3 +433,88 @@ p {
   display: inline;
   margin: 0;
 }
+
+/* --------------------------------------------------------------------- Users */
+
+.section {
+  margin-top: 32px;
+}
+
+.subsection-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cell-actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/*
+ * The one-time password reveal.
+ *
+ * The only loud thing on an intentionally quiet panel, because it is the only
+ * thing here that cannot be undone by looking again: once dismissed, the
+ * password is gone. It carries the accent rather than the danger color — nothing
+ * has gone wrong, but something is about to be lost.
+ */
+.reveal {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+}
+
+.reveal-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.reveal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Monospace and roomy: this gets read aloud and re-typed, not only pasted. */
+.reveal-secret {
+  flex: 1 1 20ch;
+  padding: 8px 12px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+  user-select: all;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.reveal-warning {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.reveal .linkbutton {
+  margin-top: 10px;
+}
+
+/* Present to a screen reader, absent to everyone else — a column of buttons
+   needs a header, and naming it on screen would be noise. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

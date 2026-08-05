@@ -7,7 +7,7 @@ import {
   listClients,
   type PlanPatch,
 } from "@smma/core";
-import { authenticateAdminRequest } from "../auth/guards.js";
+import { requireAdminSession } from "../auth/guards.js";
 import { answeringProvisionErrors } from "./provision-errors.js";
 
 /**
@@ -16,9 +16,9 @@ import { answeringProvisionErrors } from "./provision-errors.js";
  *
  * These routes are deliberately not tenant-scoped — there is no subdomain to
  * resolve here, and a Client is named by an explicit id in the path — which is
- * exactly why every one of them is behind {@link authenticateAdminRequest}: the
- * only thing standing between a caller and every Client on the platform is a
- * live operator session.
+ * exactly why every one of them is behind {@link requireAdminSession}: the only
+ * thing standing between a caller and every Client on the platform is a live
+ * operator session.
  */
 
 /**
@@ -42,15 +42,7 @@ function parsePlanToggles(plan: Record<string, unknown>): PlanPatch {
 }
 
 export async function registerClientRoutes(app: FastifyInstance): Promise<void> {
-  // Authentication for every route below, asked once. Fastify encapsulates a
-  // plugin's hooks, so this covers exactly the routes registered here — and,
-  // unlike a check inside each handler, it covers the ones added by the slices
-  // after this without anyone having to remember.
-  app.addHook("preHandler", async (request, reply) => {
-    // Returning the reply is how an async hook halts the lifecycle; the 401 has
-    // already been sent by then.
-    if (!(await authenticateAdminRequest(request, reply))) return reply;
-  });
+  requireAdminSession(app);
 
   app.post<{
     Body: { subdomain?: string; timezone?: string; plan?: Record<string, unknown> };

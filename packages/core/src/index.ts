@@ -56,9 +56,12 @@ export {
   createUser,
   findClientById,
   findClientBySubdomain,
+  findUser,
   listClients,
+  listUsers,
   setUserPassword,
   type Client,
+  type ListedUser,
   type User,
 } from "./clients.js";
 
@@ -68,6 +71,7 @@ export {
   DUMMY_PASSWORD_HASH,
   MIN_PASSWORD_LENGTH,
   WEAK_PASSWORD_MESSAGE,
+  generatePassword,
   hashPassword,
   isStrongPassword,
   verifyPassword,

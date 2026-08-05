@@ -4,6 +4,7 @@ import type pg from "pg";
 import type { Clock } from "./clock.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerClientRoutes } from "./routes/clients.js";
+import { registerUserRoutes } from "./routes/users.js";
 
 /**
  * The Superadmin API — a separate deployable from the Client-facing service
@@ -49,6 +50,7 @@ export function buildAdminApp(deps: AdminAppDeps): FastifyInstance {
 
   app.register(registerAuthRoutes);
   app.register(registerClientRoutes);
+  app.register(registerUserRoutes);
 
   // A liveness probe that proves the one thing this service needs to be up:
   // that it can reach the database.

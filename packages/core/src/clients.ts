@@ -32,6 +32,11 @@ export interface User {
   email: string;
 }
 
+/** A User as the Superadmin sees one — with when they were provisioned. */
+export interface ListedUser extends User {
+  createdAt: string;
+}
+
 /** The `clients` columns every read path selects, including the Plan columns. */
 interface ClientRow extends PlanColumns {
   id: string;
@@ -169,6 +174,72 @@ export async function createUser(
     }
     throw err;
   }
+}
+
+/**
+ * Every User of one Client, oldest first.
+ *
+ * The one administrative *read* the panel needs that nothing else on the
+ * platform performs: no Client-facing route ever returns a User's identifier —
+ * a User only ever learns about themselves — which is what made the
+ * password-reset path unreachable from any UI (PRD #15).
+ *
+ * Oldest first because the order Users were added is the order they mean
+ * something in: the Client's first login stays at the top of the list rather
+ * than sinking as their colleagues are added.
+ *
+ * Deliberately never selects `password_hash`. A read that carries a credential
+ * digest is one careless `SELECT *` away from being logged, and nothing that
+ * lists Users has any use for it.
+ */
+export async function listUsers(pool: pg.Pool, clientId: string): Promise<ListedUser[]> {
+  const { rows } = await pool.query<{
+    id: string;
+    client_id: string;
+    email: string;
+    created_at: Date;
+  }>(
+    `SELECT id, client_id, email, created_at
+     FROM users
+     WHERE client_id = $1
+     ORDER BY created_at ASC, email ASC`,
+    [clientId],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    clientId: row.client_id,
+    email: row.email,
+    createdAt: row.created_at.toISOString(),
+  }));
+}
+
+/**
+ * One User, looked up **within** a Client, or null.
+ *
+ * Scoped rather than by bare id on purpose: the only caller is the Superadmin
+ * acting from one Client's screen, and a User outside that Client is not
+ * something that screen may touch however its id was arrived at. Passing the
+ * tenant in is what makes "not found" and "not yours" the same answer, which is
+ * the answer both should have.
+ *
+ * A malformed uuid is null rather than an error, matching {@link findClientById}.
+ */
+export async function findUser(
+  pool: pg.Pool,
+  input: { clientId: string; userId: string },
+): Promise<User | null> {
+  let rows: Array<{ id: string; client_id: string; email: string }>;
+  try {
+    ({ rows } = await pool.query(
+      `SELECT id, client_id, email FROM users WHERE id = $1 AND client_id = $2`,
+      [input.userId, input.clientId],
+    ));
+  } catch (err) {
+    if ((err as { code?: string })?.code === "22P02") return null;
+    throw err;
+  }
+  const row = rows[0];
+  return row ? { id: row.id, clientId: row.client_id, email: row.email } : null;
 }
 
 /**
