@@ -159,6 +159,84 @@ export const scheduledPostCounts = (clientId: string) =>
     `/api/clients/${clientId}/scheduled-post-counts`,
   ).then((b) => b.counts);
 
+/* ----------------------------------------------------------------- Branding */
+
+/**
+ * A Client's white-label look, already resolved: a field it has never set reads
+ * as the neutral default rather than as absent.
+ *
+ * That resolution is deliberate on the API's side — it is what the Client SPA
+ * renders — and it means the panel cannot tell "set to the default" from "never
+ * set". Nothing here needs to: the form shows what a Client's Users see, and
+ * resetting a field is a thing the operator asks for explicitly rather than
+ * something the panel infers.
+ */
+export interface Branding {
+  appName: string;
+  primaryColor: string;
+  logoUrl: string | null;
+}
+
+/**
+ * What the operator may change about it. Each field is tri-state: absent leaves
+ * it alone, a string sets it, and an explicit null resets it to the neutral
+ * default — which is how a change is undone without inventing a replacement.
+ */
+export interface BrandingPatch {
+  appName?: string | null;
+  primaryColor?: string | null;
+  logoUrl?: string | null;
+}
+
+export const getBranding = (clientId: string) =>
+  apiFetch<{ branding: Branding }>(`/api/clients/${clientId}/branding`).then((b) => b.branding);
+
+export const updateBranding = (clientId: string, patch: BrandingPatch) =>
+  apiFetch<{ branding: Branding }>(`/api/clients/${clientId}/branding`, {
+    method: "PATCH",
+    body: patch,
+  }).then((b) => b.branding);
+
+/* ----------------------------------------------------------------- Timezone */
+
+/**
+ * How re-anchoring a Client would read to its Users: every Scheduled Post's
+ * displayed time on both sides of the change.
+ *
+ * The strings are formatted by the API rather than here, so that what the
+ * operator was shown at the moment they decided is a thing the suites can assert
+ * on. `scheduledAt` is the same instant in both cases and does not move — a
+ * timezone change alters what a Post's time *reads* as, never when it fires.
+ */
+export interface ShiftedPost {
+  id: string;
+  scheduledAt: string;
+  before: string;
+  after: string;
+}
+
+export interface TimezoneShift {
+  from: string;
+  to: string;
+  posts: ShiftedPost[];
+}
+
+export const timezoneShift = (clientId: string, timezone: string) =>
+  apiFetch<{ shift: TimezoneShift }>(
+    `/api/clients/${clientId}/timezone-shift?timezone=${encodeURIComponent(timezone)}`,
+  ).then((b) => b.shift);
+
+/**
+ * Re-anchor a Client. There is deliberately no counterpart for the subdomain: it
+ * is the Client's URL, and renaming it would break every link already pointing
+ * at it.
+ */
+export const updateTimezone = (clientId: string, timezone: string) =>
+  apiFetch<{ client: Client }>(`/api/clients/${clientId}/timezone`, {
+    method: "PATCH",
+    body: { timezone },
+  }).then((b) => b.client);
+
 /* -------------------------------------------------------------------- Users */
 
 export interface User {

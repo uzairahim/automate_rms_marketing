@@ -408,30 +408,47 @@ p {
   cursor: pointer;
 }
 
-.card-form,
-.card + .placeholder {
+.card-form {
   margin-top: 16px;
 }
 
-.detail {
-  display: grid;
-  grid-template-columns: minmax(120px, max-content) 1fr;
-  gap: 10px 24px;
-  margin: 0;
-  font-size: 14px;
+/* A field whose value has something beside it: a swatch, or the reset that puts
+   it back to the default. The input keeps the room it can and the rest sits at
+   its natural width. */
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
-.detail dt {
+.field-row input {
+  flex: 1 1 16ch;
+}
+
+/* The color picker: a square of the color itself, sized to the field beside it. */
+.field-row .swatch {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+/* A form's submit, and room for what the form says back to the operator. */
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 20px;
+}
+
+/* A value the operator may read and copy but not change — the subdomain. It
+   reads as stated rather than as an input someone is about to be frustrated by. */
+.field input[readonly] {
   color: var(--muted);
-}
-
-.detail dd {
-  margin: 0;
-}
-
-.detail .hint {
-  display: inline;
-  margin: 0;
+  background: var(--paper);
 }
 
 /* --------------------------------------------------------- Plan and Users */
@@ -535,6 +552,35 @@ p {
 
 .confirm .button-danger {
   background: var(--surface);
+}
+
+/*
+ * The same confirmation, for a change that breaks nothing.
+ *
+ * A timezone change is surprising rather than destructive — no Post moves, no
+ * work is lost — so it carries the accent instead of the danger color. Dressing
+ * it as a suspension would spend the panel's one loud color on something
+ * reversible, and make the colors stop meaning anything.
+ */
+.confirm-note {
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+/*
+ * The before/after times, inside the confirmation rather than beneath it.
+ *
+ * Scrolls at its own height rather than pushing Confirm and Cancel off the
+ * screen: a Client with sixty Scheduled Posts must still be able to see every
+ * one of them *and* the decision they inform.
+ */
+.shift-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.shift-scroll .table {
+  margin-top: 12px;
 }
 
 /*

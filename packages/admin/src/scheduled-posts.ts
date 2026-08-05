@@ -2,9 +2,9 @@ import type pg from "pg";
 import { PLATFORMS, type Platform } from "@smma/core";
 
 /**
- * How many Scheduled Posts a Client has, and how many of them target each
- * platform — the numbers behind the panel's consequence previews (PRD #15
- * stories 38–39).
+ * What a Client has scheduled — how many Posts, how many of them target each
+ * platform, and when each one fires. The reads behind the panel's consequence
+ * previews (PRD #15 stories 38–39 and 52).
  *
  * **This is the one place the admin service reads the Client-facing service's
  * tables, and it sits in tension with ADR 0010.** That ADR gives `posts` and
@@ -28,6 +28,42 @@ import { PLATFORMS, type Platform } from "@smma/core";
  * the operator confirms is a cosmetic problem, not a correctness one — which is
  * why it is a plain read with no locking or transaction around it.
  */
+
+/**
+ * One Scheduled Post, as much of it as this service has any business knowing:
+ * which Post it is, and when it fires.
+ *
+ * Deliberately no text, no media, and no Targets. The panel administers a
+ * Client; it does not read that Client's content, and a preview of a timezone
+ * change needs a list of times, not a list of what its Users wrote.
+ */
+export interface ScheduledPostTime {
+  id: string;
+  /** The UTC instant it fires at — the thing a timezone change does not move. */
+  scheduledAt: Date;
+}
+
+/**
+ * A Client's Scheduled Posts and their firing instants, soonest first.
+ *
+ * The read behind the timezone shift preview. Unpaginated for the same reason
+ * the Client list is: the operator has to see *every* Post whose displayed time
+ * is about to change, and a preview that showed the first twenty would be
+ * hiding exactly the surprise it exists to prevent.
+ */
+export async function listScheduledPostTimes(
+  pool: pg.Pool,
+  clientId: string,
+): Promise<ScheduledPostTime[]> {
+  const { rows } = await pool.query<{ id: string; scheduled_at: Date }>(
+    `SELECT id, scheduled_at
+     FROM posts
+     WHERE client_id = $1 AND status = 'scheduled'
+     ORDER BY scheduled_at ASC, id ASC`,
+    [clientId],
+  );
+  return rows.map((row) => ({ id: row.id, scheduledAt: row.scheduled_at }));
+}
 
 /** A Client's Scheduled Posts, totalled and broken down by targeted platform. */
 export interface ScheduledPostCounts {

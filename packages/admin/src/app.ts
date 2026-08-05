@@ -3,8 +3,10 @@ import cookie from "@fastify/cookie";
 import type pg from "pg";
 import type { Clock } from "./clock.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerBrandingRoutes } from "./routes/branding.js";
 import { registerClientRoutes } from "./routes/clients.js";
 import { registerPlanRoutes } from "./routes/plan.js";
+import { registerTimezoneRoutes } from "./routes/timezone.js";
 import { registerUserRoutes } from "./routes/users.js";
 
 /**
@@ -50,8 +52,10 @@ export function buildAdminApp(deps: AdminAppDeps): FastifyInstance {
   // here (as the Client API runs) would undo what `SameSite=Strict` is for.
 
   app.register(registerAuthRoutes);
+  app.register(registerBrandingRoutes);
   app.register(registerClientRoutes);
   app.register(registerPlanRoutes);
+  app.register(registerTimezoneRoutes);
   app.register(registerUserRoutes);
 
   // A liveness probe that proves the one thing this service needs to be up:

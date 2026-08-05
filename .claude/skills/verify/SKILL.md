@@ -116,8 +116,22 @@ for, and it needs both stacks plus the worker:
 An **expired** Client behaves identically at every one of those steps; that they
 are indistinguishable is the point, not an oversight.
 
-Its Branding is still curl-only — the panel's section for it lands in a later
-slice.
+**Its Branding** is the section below Users, and it replaces step 3's curl. Set a
+name and a color, press **Save Branding**, then reload
+`http://<subdomain>.localhost:5173` **signed out** — the sign-in screen itself
+carries them, which is the property worth seeing rather than the header after
+login. **Use the default** on any row puts that field back with no session
+involved on the Client side at all; the login screen then names nobody but the
+Client.
+
+**Its timezone** is the last section, beside the subdomain shown read-only. Give
+the Client a Scheduled Post or two first (compose them in its SPA), then change
+the zone: the confirmation lists each Post's time as it reads now and as it will
+read, and **Cancel** must leave both the field and the Client exactly as they
+were. Confirm one and open the Post in the Client SPA — its time reads
+differently while the Post has not moved. Letting it fire with
+`npm run dev:worker` running is the check that proves the second half: it goes
+out at the same moment it always would have.
 
 - The session is an httpOnly cookie, so `document.cookie` in the console is
   **expected to be empty** — that is the property, not a bug.

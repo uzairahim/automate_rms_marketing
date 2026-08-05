@@ -3,13 +3,19 @@ import { getClient, isSessionEnded, type Client, type Plan } from "./api.js";
 import { AccessStatusBadge } from "./client-bits.js";
 import { PlanSection } from "./PlanSection.js";
 import { Users } from "./Users.js";
+import { BrandingSection } from "./BrandingSection.js";
+import { TimezoneSection } from "./TimezoneSection.js";
 
 /**
  * One Client — where the operator manages it, and where provisioning lands them.
  *
  * It opens with what an operator needs to confirm they are looking at the right
  * Client before doing anything to it, and then the sections that act on it: its
- * Plan and its Users. Branding lands in the slice after this.
+ * Plan, its Users, its Branding, and the clock it is anchored to.
+ *
+ * The sections are ordered by how often an operator has business in them: the
+ * Plan and the Users are what a working day is made of, where a Client's look
+ * and its timezone are set once and then rarely touched.
  */
 export function ClientDetail({
   clientId,
@@ -62,24 +68,12 @@ export function ClientDetail({
             <AccessStatusBadge status={client.plan.accessStatus} />
           </div>
 
-          <div className="card">
-            <dl className="detail">
-              <dt>Subdomain</dt>
-              <dd>
-                {client.subdomain}
-                <span className="hint"> — permanent; the Client's URL</span>
-              </dd>
-
-              <dt>Timezone</dt>
-              <dd>{client.timezone}</dd>
-
-              {/* Neither the platforms nor the access status are restated here.
-                  Both are live controls further down the screen, and a summary
-                  that agrees with them until it doesn't is worse than no summary
-                  — the badge beside the heading is the one at-a-glance
-                  statement, and it comes from the same state. */}
-            </dl>
-          </div>
+          {/* Nothing about the Client is restated here as a summary. Its
+              subdomain, its timezone, its platforms and its access status are
+              all live controls further down the screen, and a summary that
+              agrees with them until it doesn't is worse than no summary — the
+              badge beside the heading is the one at-a-glance statement, and it
+              comes from the same state. */}
 
           <PlanSection
             client={client}
@@ -93,7 +87,17 @@ export function ClientDetail({
             onSessionEnded={onSessionEnded}
           />
 
-          <p className="placeholder">This Client's Branding is administered here too — that section lands next.</p>
+          <BrandingSection
+            clientId={client.id}
+            subdomain={client.subdomain}
+            onSessionEnded={onSessionEnded}
+          />
+
+          <TimezoneSection
+            client={client}
+            onClientChanged={setClient}
+            onSessionEnded={onSessionEnded}
+          />
         </>
       )}
     </>

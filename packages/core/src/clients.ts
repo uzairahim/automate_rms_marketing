@@ -59,8 +59,16 @@ function clientFromRow(row: ClientRow): Client {
   };
 }
 
-/** Whether the runtime's ICU data recognizes this IANA timezone name. */
-function isValidTimezone(timezone: string): boolean {
+/**
+ * Whether the runtime's ICU data recognizes this IANA timezone name.
+ *
+ * Exported because a caller can need the answer without having a write to fail:
+ * the panel's shift preview formats times in a zone the operator has only
+ * *proposed*, and a zone the runtime does not know has to be refused there too.
+ * The write paths below still check it themselves — this never becomes the only
+ * check.
+ */
+export function isValidTimezone(timezone: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: timezone });
     return true;
@@ -134,6 +142,56 @@ export async function listClients(pool: pg.Pool): Promise<Client[]> {
 }
 
 /**
+ * Re-anchor a Client to a different timezone.
+ *
+ * Mutable where the subdomain is not, and for the opposite reason: a wrong
+ * timezone is invisible until someone reads a time, and re-creating the Client
+ * to fix a typo would cost it every Post and every Connected Account it has. A
+ * wrong *subdomain* is fixed by provisioning again, because renaming one breaks
+ * every link that already points at it.
+ *
+ * This moves nothing. A Scheduled Post is stored as a UTC instant and displayed
+ * in the Client's timezone, so re-anchoring changes only what time its Posts
+ * *read* as — a Post its author set for 9am becomes a 10pm Post without its
+ * firing instant shifting by a second. Nothing here touches `posts`, and that is
+ * the point rather than an omission; the caller is expected to have shown the
+ * operator that shift first (PRD #15 story 52).
+ *
+ * @throws {ProvisionError} `invalid_timezone` if the runtime does not know the
+ * zone, `client_not_found` if no Client has that id.
+ */
+export async function updateTimezone(
+  pool: pg.Pool,
+  clientId: string,
+  timezone: string,
+): Promise<Client> {
+  const anchor = timezone.trim();
+  if (!isValidTimezone(anchor)) {
+    throw new ProvisionError("invalid_timezone", `Unknown timezone: ${timezone}`);
+  }
+
+  let rows: ClientRow[];
+  try {
+    ({ rows } = await pool.query<ClientRow>(
+      `UPDATE clients SET timezone = $2 WHERE id = $1 RETURNING ${CLIENT_COLUMNS}`,
+      [clientId, anchor],
+    ));
+  } catch (err) {
+    // A malformed uuid (22P02) names a Client that cannot exist → 404.
+    if ((err as { code?: string })?.code === "22P02") {
+      throw new ProvisionError("client_not_found", `No such Client: ${clientId}`);
+    }
+    throw err;
+  }
+
+  const row = rows[0];
+  if (!row) {
+    throw new ProvisionError("client_not_found", `No such Client: ${clientId}`);
+  }
+  return clientFromRow(row);
+}
+
+/**
  * Provision a User under an existing Client. The email is normalized and must
  * be globally unique; a collision anywhere on the platform is rejected. The
  * password is hashed before it is ever stored.
@@ -175,6 +233,7 @@ export async function createUser(
     throw err;
   }
 }
+
 
 /**
  * Every User of one Client, oldest first.
