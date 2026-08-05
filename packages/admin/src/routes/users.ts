@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import {
   ProvisionError,
   createUser,
-  findClientById,
   findUser,
   generatePassword,
   listUsers,
@@ -10,6 +9,7 @@ import {
 } from "@smma/core";
 import { requireAdminSession } from "../auth/guards.js";
 import { answeringProvisionErrors } from "./provision-errors.js";
+import { requireClient } from "./require-client.js";
 
 /**
  * A Client's Users — who can log in, and how they are issued a credential.
@@ -31,20 +31,6 @@ import { answeringProvisionErrors } from "./provision-errors.js";
 export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
   requireAdminSession(app);
 
-  /**
-   * Resolve the Client named in the path, or refuse.
-   *
-   * Read explicitly rather than left to a foreign-key violation, because the
-   * list and reset routes have no insert to fail: without this, listing the
-   * Users of a Client that does not exist would answer an empty list, which
-   * reads exactly like a Client that exists and has none.
-   */
-  async function requireClient(clientId: string): Promise<void> {
-    if (!(await findClientById(app.adminDeps.pool, clientId))) {
-      throw new ProvisionError("client_not_found", `No such Client: ${clientId}`);
-    }
-  }
-
   // Who can log in. The administrative read nothing else on the platform
   // performs — no Client-facing route ever returns a User's identifier — and
   // therefore the thing that makes the reset below reachable from a UI at all.
@@ -53,7 +39,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       return answeringProvisionErrors(reply, async () => {
         const { clientId } = request.params;
-        await requireClient(clientId);
+        await requireClient(app.adminDeps.pool, clientId);
         return reply.code(200).send({ users: await listUsers(app.adminDeps.pool, clientId) });
       });
     },
@@ -98,7 +84,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       return answeringProvisionErrors(reply, async () => {
         const { clientId, userId } = request.params;
-        await requireClient(clientId);
+        await requireClient(app.adminDeps.pool, clientId);
 
         // Scoped to this Client: a User belonging to another one is not this
         // screen's to reset, however the operator arrived at the id.

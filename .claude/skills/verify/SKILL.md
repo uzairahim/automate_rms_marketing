@@ -92,8 +92,32 @@ already signed in at `http://<subdomain>.localhost:5173` drops to the sign-in fo
 on its next request. Signing into the Client SPA with a password the panel just
 generated is the end-to-end check worth doing here.
 
-Its Plan and Branding are still curl-only — the panel's sections for them land in
-later slices.
+**Changing its Plan** is the Plan section above Users. Ticking a platform on
+applies immediately; ticking one off, or suspending, first states how many
+Scheduled Posts it breaks and can be cancelled — cancelling is the case worth
+clicking, since backing out must leave the Client exactly as it was. Give the
+Client a Scheduled Post first (compose one in its SPA a few minutes out) or every
+preview reads zero and proves nothing.
+
+**That suspension actually suspends** is the end-to-end check this section exists
+for, and it needs both stacks plus the worker:
+
+1. Schedule a Post in the Client SPA, a couple of minutes out.
+2. **Suspend** the Client in the panel, confirming past the preview.
+3. The browser already signed in at `http://acme.localhost:5173` drops out on its
+   next request, and signing in again says the access is suspended rather than
+   that the password is wrong.
+4. Let the scheduled time pass with `npm run dev:worker` running. The Post ends
+   **Failed**, its Targets naming suspension — and the API log shows the tick
+   counted it `blocked`, never `fired`. Nothing was sent to a Publisher at all.
+5. **Restore to active** and schedule another. It fires normally, and nothing was
+   deleted in between.
+
+An **expired** Client behaves identically at every one of those steps; that they
+are indistinguishable is the point, not an oversight.
+
+Its Branding is still curl-only — the panel's section for it lands in a later
+slice.
 
 - The session is an httpOnly cookie, so `document.cookie` in the console is
   **expected to be empty** — that is the property, not a bug.

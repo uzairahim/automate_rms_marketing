@@ -1,14 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import {
-  PLATFORMS,
-  ProvisionError,
-  createClient,
-  findClientById,
-  listClients,
-  type PlanPatch,
-} from "@smma/core";
+import { createClient, listClients } from "@smma/core";
 import { requireAdminSession } from "../auth/guards.js";
 import { answeringProvisionErrors } from "./provision-errors.js";
+import { parsePlanToggles } from "./plan-body.js";
+import { requireClient } from "./require-client.js";
 
 /**
  * The Superadmin's single global view of the platform, and the ability to add
@@ -21,29 +16,17 @@ import { answeringProvisionErrors } from "./provision-errors.js";
  * operator session.
  */
 
-/**
- * Read the platform toggles out of a create body. An omitted toggle is off — a
- * Client sees and pays for only what it needs.
- *
- * Access status is not read at all: a new Client is always `active`, so there is
- * nothing here for a caller to set, correctly or otherwise.
- */
-function parsePlanToggles(plan: Record<string, unknown>): PlanPatch {
-  const toggles: PlanPatch = {};
-  for (const platform of PLATFORMS) {
-    const value = plan[platform];
-    if (value === undefined) continue;
-    if (typeof value !== "boolean") {
-      throw new ProvisionError("invalid_plan", `${platform} must be true or false.`);
-    }
-    toggles[platform] = value;
-  }
-  return toggles;
-}
-
 export async function registerClientRoutes(app: FastifyInstance): Promise<void> {
   requireAdminSession(app);
 
+  // Provision a Client. An omitted platform toggle is off here — a Client sees
+  // and pays for only what it needs — where the same field on a patch means
+  // unchanged; `parsePlanToggles` reads the wire, and this is what decides what
+  // silence in it means.
+  //
+  // Access status is not read from a create body at all: a new Client is always
+  // `active`, so there is nothing here for a caller to set, correctly or
+  // otherwise, which is why this parses toggles rather than a whole Plan patch.
   app.post<{
     Body: { subdomain?: string; timezone?: string; plan?: Record<string, unknown> };
   }>("/api/clients", async (request, reply) => {
@@ -73,15 +56,10 @@ export async function registerClientRoutes(app: FastifyInstance): Promise<void> 
 
   // One Client — the screen the operator manages it from, and where provisioning
   // lands them. It carries the Plan because the sections that edit it live here
-  // too, from the slices after this one.
+  // too.
   app.get<{ Params: { clientId: string } }>("/api/clients/:clientId", async (request, reply) => {
     return answeringProvisionErrors(reply, async () => {
-      const client = await findClientById(app.adminDeps.pool, request.params.clientId);
-      // Raised rather than answered here, so "no such Client" has one status and
-      // one message across every route that can say it.
-      if (!client) {
-        throw new ProvisionError("client_not_found", `No such Client: ${request.params.clientId}`);
-      }
+      const client = await requireClient(app.adminDeps.pool, request.params.clientId);
       return reply.code(200).send({ client });
     });
   });

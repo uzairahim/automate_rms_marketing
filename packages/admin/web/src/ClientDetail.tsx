@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { getClient, isSessionEnded, type Client } from "./api.js";
-import { AccessStatusBadge, PlanSummary } from "./client-bits.js";
+import { getClient, isSessionEnded, type Client, type Plan } from "./api.js";
+import { AccessStatusBadge } from "./client-bits.js";
+import { PlanSection } from "./PlanSection.js";
 import { Users } from "./Users.js";
 
 /**
  * One Client — where the operator manages it, and where provisioning lands them.
  *
  * It opens with what an operator needs to confirm they are looking at the right
- * Client before doing anything to it, and then the sections that act on it. Only
- * Users so far; the Plan and Branding sections land in the slices after this.
+ * Client before doing anything to it, and then the sections that act on it: its
+ * Plan and its Users. Branding lands in the slice after this.
  */
 export function ClientDetail({
   clientId,
@@ -72,14 +73,19 @@ export function ClientDetail({
               <dt>Timezone</dt>
               <dd>{client.timezone}</dd>
 
-              {/* Access status is the badge beside the heading — stating it twice
-                  on one screen would be two things to keep in agreement. */}
-              <dt>Platforms</dt>
-              <dd>
-                <PlanSummary plan={client.plan} />
-              </dd>
+              {/* Neither the platforms nor the access status are restated here.
+                  Both are live controls further down the screen, and a summary
+                  that agrees with them until it doesn't is worse than no summary
+                  — the badge beside the heading is the one at-a-glance
+                  statement, and it comes from the same state. */}
             </dl>
           </div>
+
+          <PlanSection
+            client={client}
+            onPlanChanged={(plan: Plan) => setClient({ ...client, plan })}
+            onSessionEnded={onSessionEnded}
+          />
 
           <Users
             clientId={client.id}
@@ -87,10 +93,7 @@ export function ClientDetail({
             onSessionEnded={onSessionEnded}
           />
 
-          <p className="placeholder">
-            This Client's Plan and Branding are administered here too — those sections
-            land next.
-          </p>
+          <p className="placeholder">This Client's Branding is administered here too — that section lands next.</p>
         </>
       )}
     </>

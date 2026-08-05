@@ -31,16 +31,23 @@ export function clientHost(subdomain: string): string {
  * A suite may pass its own {@link FakeEmailSender} when it needs to read what
  * the Client-facing service sent — the self-service reset link is the only such
  * message, and the panel's reset has to invalidate one.
+ *
+ * A suite may likewise pass its own {@link FakePublisher} when it needs to
+ * assert that suspending a Client stopped publishing: "nothing was sent" is only
+ * provable by holding the Publisher that would have been sent to. It belongs to
+ * the *Client-facing* fixture, never to the admin harness — the admin service
+ * never publishes, and giving it a Publisher would imply it might.
  */
 export function buildTestClientApp(deps: {
   pool: pg.Pool;
   clock: Clock;
   emailSender?: FakeEmailSender;
+  publisher?: FakePublisher;
 }): FastifyInstance {
   return buildApp({
     pool: deps.pool,
     clock: deps.clock,
-    publisher: new FakePublisher(),
+    publisher: deps.publisher ?? new FakePublisher(),
     emailSender: deps.emailSender ?? new FakeEmailSender(),
     tokenCipher: createSecretCipher(Buffer.alloc(32, 7)),
     baseDomain: BASE_DOMAIN,

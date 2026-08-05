@@ -434,7 +434,7 @@ p {
   margin: 0;
 }
 
-/* --------------------------------------------------------------------- Users */
+/* --------------------------------------------------------- Plan and Users */
 
 .section {
   margin-top: 32px;
@@ -450,6 +450,91 @@ p {
   width: 1%;
   white-space: nowrap;
   text-align: right;
+}
+
+/*
+ * Access status: a label, the transitions available from where the Client is
+ * now, and why the operator would use them.
+ *
+ * Only the moves that make sense are offered — an active Client can be suspended
+ * or expired, a lapsed one restored — so the control never has to be read
+ * against the badge to work out what it would do.
+ */
+.access {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.access-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/*
+ * A change that takes something away.
+ *
+ * Danger-colored because these are the two buttons on the panel that break work
+ * a Client has already done — and deliberately still ordinary buttons, since
+ * every one of them is reversible: nothing here deletes anything.
+ */
+.button-danger {
+  color: var(--danger);
+  background: var(--surface);
+  border-color: currentColor;
+}
+
+.button-danger:hover:not(:disabled) {
+  filter: none;
+  background: var(--danger-bg);
+}
+
+/*
+ * The consequence preview.
+ *
+ * Inline rather than a modal, on purpose: the operator has to be able to see the
+ * Plan they are changing while they read what changing it costs. It carries the
+ * danger color because, unlike the password reveal, something here is about to
+ * break — and it is the one place on this panel where "Cancel" is the answer the
+ * layout should make easy.
+ */
+.confirm {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+}
+
+.confirm-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.confirm-body {
+  margin: 0;
+  font-size: 14px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.confirm .button-danger {
+  background: var(--surface);
 }
 
 /*

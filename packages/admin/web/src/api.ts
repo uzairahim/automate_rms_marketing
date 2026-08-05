@@ -126,6 +126,39 @@ export const createClient = (input: {
     (b) => b.client,
   );
 
+/* --------------------------------------------------------------------- Plan */
+
+/** What the operator may change about a Plan. A patch: absent means unchanged. */
+export type PlanPatch = Partial<Record<Platform, boolean>> & { accessStatus?: AccessStatus };
+
+/**
+ * Change a Client's Plan. Sends only what is changing, so flipping one platform
+ * cannot silently restate — and overwrite — a change made from another tab.
+ */
+export const updatePlan = (clientId: string, patch: PlanPatch) =>
+  apiFetch<{ plan: Plan }>(`/api/clients/${clientId}/plan`, {
+    method: "PATCH",
+    body: patch,
+  }).then((b) => b.plan);
+
+/**
+ * What a Plan change is about to break: how many Scheduled Posts the Client has,
+ * and how many of them target each platform.
+ *
+ * The per-platform numbers do not sum to the total — one Post targeting two
+ * platforms appears under both, because it is one Post that either downgrade
+ * would partly break.
+ */
+export interface ScheduledPostCounts {
+  total: number;
+  byPlatform: Record<Platform, number>;
+}
+
+export const scheduledPostCounts = (clientId: string) =>
+  apiFetch<{ counts: ScheduledPostCounts }>(
+    `/api/clients/${clientId}/scheduled-post-counts`,
+  ).then((b) => b.counts);
+
 /* -------------------------------------------------------------------- Users */
 
 export interface User {
